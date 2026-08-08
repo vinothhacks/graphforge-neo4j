@@ -1,8 +1,6 @@
 """Microsoft SQL Server schema extractor (via pyodbc)."""
 from __future__ import annotations
 
-from typing import List, Tuple
-
 from .base import SchemaExtractor
 
 _SYSTEM_SCHEMAS = {
@@ -41,14 +39,18 @@ class MssqlExtractor(SchemaExtractor):
         finally:
             conn.close()
 
-    def schemas(self, database: str, cursor) -> List[str]:
+    def quote_ident(self, name: str) -> str:
+        return "[" + name.replace("]", "]]") + "]"
+
+    def schemas(self, database: str, cursor) -> list[str]:
+        """Honour an explicit --schemas filter, exactly as PostgreSQL does."""
         if self.schema_filter:
-            return self.schema_filter
+            return list(self.schema_filter)
         cursor.execute("SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA")
         rows = [r[0] for r in cursor.fetchall() if r[0] not in _SYSTEM_SCHEMAS]
         return rows or ["dbo"]
 
-    def indexes_sql(self, schema: str) -> Tuple[str, tuple]:
+    def indexes_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT t.name AS table_name, i.name AS name, i.is_unique AS is_unique, "
             "i.type_desc AS index_type, STRING_AGG(c.name, ',') AS columns "
@@ -71,7 +73,7 @@ class MssqlExtractor(SchemaExtractor):
             "columns": [c for c in cols.split(",") if c],
         }
 
-    def procedures_sql(self, schema: str) -> Tuple[str, tuple]:
+    def procedures_sql(self, schema: str) -> tuple[str, tuple]:
         # INFORMATION_SCHEMA.ROUTINE_DEFINITION is truncated at 4000 chars on
         # SQL Server; OBJECT_DEFINITION returns the full body.
         return (

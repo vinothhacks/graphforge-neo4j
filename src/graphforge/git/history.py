@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import subprocess
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional
 
 log = logging.getLogger("graphforge.git.history")
 
@@ -23,17 +22,23 @@ _FMT = _MARK + _US + _US.join(
 
 @dataclass
 class HistoryData:
-    authors: Dict[str, dict] = field(default_factory=dict)
-    commits: List[dict] = field(default_factory=list)
-    branches: List[dict] = field(default_factory=list)
-    tags: List[dict] = field(default_factory=list)
+    authors: dict[str, dict] = field(default_factory=dict)
+    commits: list[dict] = field(default_factory=list)
+    branches: list[dict] = field(default_factory=list)
+    tags: list[dict] = field(default_factory=list)
     head: str = ""
+    since: str = ""          # sha the incremental walk started after ('' == full)
+
+    @property
+    def changed_paths(self) -> set[str]:
+        """Repo-relative paths touched by the commits in this window."""
+        return {f["path"] for c in self.commits for f in c["files"] if f.get("path")}
 
 
-def _run(repo_path: str, args: List[str]) -> str:
+def _run(repo_path: str, args: list[str]) -> str:
     proc = subprocess.run(
         ["git", *args], cwd=repo_path, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=900,
+        encoding="utf-8", errors="replace", timeout=900, check=False,
     )
     if proc.returncode != 0:
         log.debug("git %s -> %s", " ".join(args), proc.stderr.strip())
@@ -51,16 +56,22 @@ def _normalise_path(path: str) -> str:
     return path.strip()
 
 
-def _parse_log(repo_path: str, mode: str, limit: int):
-    """Return (per_commit_files, headers) for --numstat or --name-status."""
-    args = ["log", "--all", f"--pretty=format:{_FMT}", f"--{mode}"]
+def _parse_log(repo_path: str, mode: str, limit: int, since: str = ""):
+    """Return (per_commit_files, headers) for --numstat or --name-status.
+
+    ``since`` restricts the walk to ``<sha>..HEAD`` (incremental ingest); without
+    it every ref is walked.
+    """
+    args = ["log"]
+    args.append(f"{since}..HEAD" if since else "--all")
+    args += [f"--pretty=format:{_FMT}", f"--{mode}"]
     if limit and limit > 0:
         args += ["-n", str(limit)]
     out = _run(repo_path, args)
 
-    per_commit: Dict[str, List[dict]] = {}
-    current: Optional[str] = None
-    header_fields: Dict[str, dict] = {}
+    per_commit: dict[str, list[dict]] = {}
+    current: str | None = None
+    header_fields: dict[str, dict] = {}
 
     for line in out.splitlines():
         if line.startswith(_MARK):
@@ -92,16 +103,47 @@ def _parse_log(repo_path: str, mode: str, limit: int):
     return per_commit, header_fields
 
 
-def extract_history(repo_path: str, limit: int = 0) -> HistoryData:
+def changed_paths(repo_path: str, since: str) -> set[str]:
+    """Repo-relative paths that differ between ``since`` and HEAD."""
+    if not since:
+        return set()
+    out = _run(repo_path, ["diff", "--name-only", f"{since}..HEAD"])
+    return {line.strip() for line in out.splitlines() if line.strip()}
+
+
+def head_commit(repo_path: str) -> str:
+    """Full sha of HEAD, or '' if the path is not a usable repository."""
+    return _run(repo_path, ["rev-parse", "HEAD"]).strip()
+
+
+def commit_exists(repo_path: str, sha: str) -> bool:
+    """True when ``sha`` resolves to a commit in this repository."""
+    if not sha:
+        return False
+    proc = subprocess.run(
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=repo_path,
+        capture_output=True, text=True, timeout=60, check=False,
+    )
+    return proc.returncode == 0
+
+
+def extract_history(repo_path: str, limit: int = 0, since_commit: str = "") -> HistoryData:
+    """Read commits, authors, refs. ``since_commit`` walks only ``<sha>..HEAD``."""
     data = HistoryData()
 
-    numstat, headers = _parse_log(repo_path, "numstat", limit)
-    namestat, _ = _parse_log(repo_path, "name-status", limit)
+    since = since_commit if since_commit and commit_exists(repo_path, since_commit) else ""
+    if since_commit and not since:
+        log.warning("--since-commit %s not found in %s; falling back to full history",
+                    since_commit, repo_path)
+    data.since = since
+
+    numstat, headers = _parse_log(repo_path, "numstat", limit, since)
+    namestat, _ = _parse_log(repo_path, "name-status", limit, since)
 
     for h, meta in headers.items():
         # merge per-file insertions/deletions with change type
         type_by_path = {r["path"]: r.get("changeType", "M") for r in namestat.get(h, [])}
-        files: List[dict] = []
+        files: list[dict] = []
         total_ins = total_del = 0
         for row in numstat.get(h, []):
             files.append({
@@ -137,7 +179,7 @@ def extract_history(repo_path: str, limit: int = 0) -> HistoryData:
     return data
 
 
-def _branches(repo_path: str) -> List[dict]:
+def _branches(repo_path: str) -> list[dict]:
     out = _run(repo_path, ["branch", "-a", "--format=%(refname:short)" + _US + "%(objectname)"])
     seen, result = set(), []
     for line in out.splitlines():
@@ -151,7 +193,7 @@ def _branches(repo_path: str) -> List[dict]:
     return result
 
 
-def _tags(repo_path: str) -> List[dict]:
+def _tags(repo_path: str) -> list[dict]:
     fmt = "%(refname:short)" + _US + "%(objectname)" + _US + "%(*objectname)"
     out = _run(repo_path, ["tag", "--format=" + fmt])
     result = []

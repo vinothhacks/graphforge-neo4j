@@ -1,7 +1,7 @@
 """MySQL / MariaDB schema extractor."""
 from __future__ import annotations
 
-from typing import Tuple
+from typing import ClassVar
 
 from .base import SchemaExtractor
 
@@ -11,7 +11,7 @@ class MySQLExtractor(SchemaExtractor):
     placeholder = "%s"
     default_schema_is_database = True  # one schema, named after the database
 
-    _SYSTEM_DBS = {"information_schema", "mysql", "performance_schema", "sys"}
+    _SYSTEM_DBS: ClassVar[set[str]] = {"information_schema", "mysql", "performance_schema", "sys"}
 
     def connect(self, database: str):
         try:
@@ -20,7 +20,7 @@ class MySQLExtractor(SchemaExtractor):
             raise RuntimeError(
                 "mysql-connector-python is not installed. Run: pip install mysql-connector-python"
             ) from exc
-        kwargs = dict(host=self.host, port=self.port, user=self.user, password=self.password)
+        kwargs = {"host": self.host, "port": self.port, "user": self.user, "password": self.password}
         if database:  # omit to connect at server level (for discovery)
             kwargs["database"] = database
         return mysql.connector.connect(**kwargs)
@@ -34,7 +34,10 @@ class MySQLExtractor(SchemaExtractor):
         finally:
             conn.close()
 
-    def columns_sql(self, schema: str) -> Tuple[str, tuple]:
+    def quote_ident(self, name: str) -> str:
+        return "`" + name.replace("`", "``") + "`"
+
+    def columns_sql(self, schema: str) -> tuple[str, tuple]:
         # MySQL exposes COLUMN_KEY (PRI/UNI/MUL) and EXTRA (auto_increment, ...)
         return (
             "SELECT TABLE_NAME AS table_name, COLUMN_NAME AS name, ORDINAL_POSITION AS ordinal, "
@@ -45,7 +48,7 @@ class MySQLExtractor(SchemaExtractor):
             (schema,),
         )
 
-    def indexes_sql(self, schema: str) -> Tuple[str, tuple]:
+    def indexes_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT TABLE_NAME AS table_name, INDEX_NAME AS name, NON_UNIQUE AS non_unique, "
             "INDEX_TYPE AS index_type, "
@@ -65,7 +68,7 @@ class MySQLExtractor(SchemaExtractor):
             "columns": [c for c in cols.split(",") if c],
         }
 
-    def foreign_keys_sql(self, schema: str) -> Tuple[str, tuple]:
+    def foreign_keys_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT CONSTRAINT_NAME AS constraint_name, TABLE_NAME AS from_table, "
             "COLUMN_NAME AS from_column, REFERENCED_TABLE_NAME AS to_table, "

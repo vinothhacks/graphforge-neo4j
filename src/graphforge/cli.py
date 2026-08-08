@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import sys
-from typing import List, Optional
 
 from . import __version__
 from .core.config import Settings, load_settings
@@ -67,8 +66,8 @@ def _report(writer: Neo4jWriter, extra: str = "") -> None:
 # ----------------------------------------------------------------------------
 # git
 # ----------------------------------------------------------------------------
-def _resolve_git_sources(args, git_settings) -> List[dict]:
-    specs: List[dict] = []
+def _resolve_git_sources(args, git_settings) -> list[dict]:
+    specs: list[dict] = []
     if args.config:
         with open(args.config, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -109,6 +108,7 @@ def cmd_git(args) -> int:
             with_structure=not args.no_structure,
             with_history=not args.no_history,
             replace=args.replace,
+            since_commit=getattr(args, "since_commit", "") or "",
         )
         extra = f"{stats['repos']} repos, {stats['files']} files, {stats['commits']} commits"
         if stats.get("failed"):
@@ -120,7 +120,13 @@ def cmd_git(args) -> int:
 # ----------------------------------------------------------------------------
 # db
 # ----------------------------------------------------------------------------
-def _resolve_db_sources(args, db_settings) -> List[dict]:
+def _default_schemas(engine: str, db_settings) -> list[str]:
+    """PG_SCHEMAS is a PostgreSQL default; other engines discover their own."""
+    return list(db_settings.pg_schemas) if (engine or "").lower().startswith(("pg", "postgres")) else []
+
+
+def _resolve_db_sources(args, db_settings) -> list[dict]:
+    sample_rows = getattr(args, "sample_rows", 0) or 0
     if args.config:
         with open(args.config, encoding="utf-8") as fh:
             data = json.load(fh)
@@ -128,6 +134,8 @@ def _resolve_db_sources(args, db_settings) -> List[dict]:
         for src in sources:
             if "password" not in src and src.get("passwordEnv"):
                 src["password"] = os.getenv(src["passwordEnv"], "")
+            if sample_rows:
+                src["sampleRows"] = sample_rows
         return sources
 
     url = getattr(args, "url", None) or os.getenv("DB_URL")
@@ -140,6 +148,7 @@ def _resolve_db_sources(args, db_settings) -> List[dict]:
             src["driver"] = args.driver
         if args.schemas:
             src["schemas"] = [s.strip() for s in args.schemas.split(",") if s.strip()]
+        src["sampleRows"] = sample_rows
         return [src]
 
     engine = args.engine or db_settings.engine
@@ -153,7 +162,9 @@ def _resolve_db_sources(args, db_settings) -> List[dict]:
         # empty -> auto-discover every non-system database on the server
         "databases": [d.strip() for d in databases if d.strip()],
         "driver": args.driver or db_settings.mssql_driver,
-        "schemas": (args.schemas.split(",") if args.schemas else db_settings.pg_schemas),
+        "schemas": (args.schemas.split(",") if args.schemas
+                    else _default_schemas(engine, db_settings)),
+        "sampleRows": sample_rows,
     }]
 
 
@@ -213,7 +224,7 @@ def cmd_link(args) -> int:
         selected = list(PASSES)  # default: run every pass
     s = _settings(args)
     with _writer(s, args) as w:
-        n = LinkRunner(w).run(selected)
+        n = LinkRunner(w).run(selected, min_name_len=args.min_table_name_len)
         _report(w, f"{n} link passes: {', '.join(selected)}")
     return 0
 
@@ -273,6 +284,8 @@ def cmd_mcp(args) -> int:
 
 # ----------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
+    from .link import passes as link_passes  # for the --min-table-name-len default
+
     parser = argparse.ArgumentParser(prog="graphforge", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"graphforge {__version__}")
@@ -295,6 +308,9 @@ def build_parser() -> argparse.ArgumentParser:
     p_git.add_argument("--replace", action="store_true", help="delete each repo's existing subgraph first")
     p_git.add_argument("--since", type=int, default=0, metavar="DAYS",
                        help="GitLab discovery: only repos active in the last N days")
+    p_git.add_argument("--since-commit", dest="since_commit", metavar="SHA", default="",
+                       help="incremental ingest: only commits after SHA (or 'auto' to "
+                            "continue from :Repository.lastCommit)")
     _add_common(p_git)
     _add_writer_opts(p_git)
     p_git.set_defaults(func=cmd_git)
@@ -311,6 +327,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_db.add_argument("--databases", help="comma-separated database names")
     p_db.add_argument("--driver", help="MSSQL ODBC driver name")
     p_db.add_argument("--schemas", help="comma-separated schema filter (postgres/mssql)")
+    p_db.add_argument("--sample-rows", dest="sample_rows", type=int, default=0, metavar="N",
+                      help="opt-in profiling: COUNT(*) every table into :Table.approxRows, "
+                           "and for tables of at most N rows also COUNT(DISTINCT col) into "
+                           ":Column.approxCardinality (default 0 = off)")
     p_db.add_argument("--replace", action="store_true", help="delete each database's existing subgraph first")
     _add_common(p_db)
     _add_writer_opts(p_db)
@@ -333,6 +353,10 @@ def build_parser() -> argparse.ArgumentParser:
     p_link.add_argument("--based-on", action="store_true", help="View -> Table (same DB)")
     p_link.add_argument("--uses-table", action="store_true", help="StoredProcedure -> Table (same DB)")
     p_link.add_argument("--cross-db", action="store_true", help="View -> Table (different DB)")
+    p_link.add_argument("--min-table-name-len", dest="min_table_name_len", type=int,
+                        default=link_passes.DEFAULT_MIN_NAME_LEN, metavar="N",
+                        help="ignore table names shorter than N characters in the SQL-text "
+                             f"passes (default {link_passes.DEFAULT_MIN_NAME_LEN})")
     _add_common(p_link)
     _add_writer_opts(p_link)
     p_link.set_defaults(func=cmd_link)
@@ -358,7 +382,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: Optional[List[str]] = None) -> int:
+def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
     logging.basicConfig(

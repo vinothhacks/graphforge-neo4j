@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 import re
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 log = logging.getLogger("graphforge.db")
 
@@ -21,12 +21,12 @@ log = logging.getLogger("graphforge.db")
 @dataclass
 class SchemaMeta:
     name: str
-    tables: List[dict] = field(default_factory=list)
-    columns: List[dict] = field(default_factory=list)
-    indexes: List[dict] = field(default_factory=list)
-    views: List[dict] = field(default_factory=list)
-    procedures: List[dict] = field(default_factory=list)
-    foreign_keys: List[dict] = field(default_factory=list)
+    tables: list[dict] = field(default_factory=list)
+    columns: list[dict] = field(default_factory=list)
+    indexes: list[dict] = field(default_factory=list)
+    views: list[dict] = field(default_factory=list)
+    procedures: list[dict] = field(default_factory=list)
+    foreign_keys: list[dict] = field(default_factory=list)
 
 
 @dataclass
@@ -34,7 +34,7 @@ class DatabaseMeta:
     name: str
     engine: str
     host: str
-    schemas: List[SchemaMeta] = field(default_factory=list)
+    schemas: list[SchemaMeta] = field(default_factory=list)
 
 
 class SchemaExtractor:
@@ -43,30 +43,34 @@ class SchemaExtractor:
     default_schema_is_database: bool = True  # MySQL-style: one schema == the database
 
     def __init__(self, host: str, port: int, user: str, password: str,
-                 driver: Optional[str] = None, schemas: Optional[List[str]] = None):
+                 driver: str | None = None, schemas: list[str] | None = None,
+                 sample_rows: int = 0):
         self.host = host
         self.port = port
         self.user = user
         self.password = password
         self.driver = driver
-        self.schema_filter = schemas or []
+        self.schema_filter = [s.strip() for s in (schemas or []) if s and s.strip()]
+        # 0 == off. When > 0 it doubles as the row ceiling under which the
+        # (more expensive) per-column COUNT(DISTINCT) probes are also run.
+        self.sample_rows = int(sample_rows or 0)
 
     # -- connection (dialect-specific) ------------------------------------
     def connect(self, database: str):
         raise NotImplementedError
 
-    def list_databases(self) -> List[str]:
+    def list_databases(self) -> list[str]:
         """Return non-system database names on the server (for auto-discovery)."""
         raise NotImplementedError(f"{self.engine} does not support auto-discovery")
 
     # -- schema discovery --------------------------------------------------
-    def schemas(self, database: str, cursor) -> List[str]:
+    def schemas(self, database: str, cursor) -> list[str]:
         """Which schema names to import within a connected database."""
         if self.default_schema_is_database:
             return [database]
         return list(self.schema_filter) if self.schema_filter else self._all_schemas(cursor)
 
-    def _all_schemas(self, cursor) -> List[str]:
+    def _all_schemas(self, cursor) -> list[str]:
         cursor.execute(
             "SELECT SCHEMA_NAME FROM INFORMATION_SCHEMA.SCHEMATA "
             "WHERE SCHEMA_NAME NOT IN ('information_schema','pg_catalog',"
@@ -75,7 +79,7 @@ class SchemaExtractor:
         return [r[0] for r in cursor.fetchall()]
 
     # -- portable INFORMATION_SCHEMA queries ------------------------------
-    def tables_sql(self, schema: str) -> Tuple[str, tuple]:
+    def tables_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT TABLE_NAME AS name FROM INFORMATION_SCHEMA.TABLES "
             f"WHERE TABLE_SCHEMA = {self.placeholder} AND TABLE_TYPE = 'BASE TABLE' "
@@ -83,7 +87,7 @@ class SchemaExtractor:
             (schema,),
         )
 
-    def columns_sql(self, schema: str) -> Tuple[str, tuple]:
+    def columns_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT TABLE_NAME AS table_name, COLUMN_NAME AS name, ORDINAL_POSITION AS ordinal, "
             "DATA_TYPE AS data_type, IS_NULLABLE AS is_nullable, COLUMN_DEFAULT AS column_default "
@@ -92,7 +96,7 @@ class SchemaExtractor:
             (schema,),
         )
 
-    def views_sql(self, schema: str) -> Tuple[str, tuple]:
+    def views_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT TABLE_NAME AS name, VIEW_DEFINITION AS definition "
             f"FROM INFORMATION_SCHEMA.VIEWS WHERE TABLE_SCHEMA = {self.placeholder} "
@@ -100,7 +104,7 @@ class SchemaExtractor:
             (schema,),
         )
 
-    def procedures_sql(self, schema: str) -> Tuple[str, tuple]:
+    def procedures_sql(self, schema: str) -> tuple[str, tuple]:
         # ROUTINE_DEFINITION carries the SQL body (needed for impact analysis).
         return (
             "SELECT ROUTINE_NAME AS name, ROUTINE_TYPE AS routine_type, "
@@ -110,7 +114,7 @@ class SchemaExtractor:
             (schema,),
         )
 
-    def parameters_sql(self, schema: str) -> Tuple[str, tuple]:
+    def parameters_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT SPECIFIC_NAME AS routine, PARAMETER_NAME AS name, "
             "DATA_TYPE AS data_type, PARAMETER_MODE AS mode, ORDINAL_POSITION AS ordinal "
@@ -119,10 +123,10 @@ class SchemaExtractor:
             (schema,),
         )
 
-    def indexes_sql(self, schema: str) -> Tuple[str, tuple]:
+    def indexes_sql(self, schema: str) -> tuple[str, tuple]:
         raise NotImplementedError  # dialect-specific
 
-    def foreign_keys_sql(self, schema: str) -> Tuple[str, tuple]:
+    def foreign_keys_sql(self, schema: str) -> tuple[str, tuple]:
         # ANSI standard join; MySQL overrides with its simpler REFERENCED_* columns.
         return (
             "SELECT rc.CONSTRAINT_NAME AS constraint_name, "
@@ -176,22 +180,22 @@ class SchemaExtractor:
 
     # -- driver loop -------------------------------------------------------
     @staticmethod
-    def _rows(cursor, sql_params: Tuple[str, tuple]) -> List[dict]:
+    def _rows(cursor, sql_params: tuple[str, tuple]) -> list[dict]:
         sql, params = sql_params
         cursor.execute(sql, params)
         cols = [d[0].lower() for d in cursor.description]
         return [dict(zip(cols, row)) for row in cursor.fetchall()]
 
-    def _attach_parameters(self, cursor, schema: str, procedures: List[dict]) -> None:
+    def _attach_parameters(self, cursor, schema: str, procedures: list[dict]) -> None:
         """Group INFORMATION_SCHEMA.PARAMETERS rows onto their procedures."""
         if not procedures:
             return
         try:
             rows = self._rows(cursor, self.parameters_sql(schema))
-        except Exception as exc:  # PARAMETERS may be restricted
+        except Exception as exc:  # noqa: BLE001  # PARAMETERS may be restricted; DB-API drivers raise dialect-specific errors
             log.warning("parameter extraction failed for %s: %s", schema, exc)
             return
-        by_routine: Dict[str, List[str]] = {}
+        by_routine: dict[str, list[str]] = {}
         for r in rows:
             if not r.get("name"):  # skip function return rows
                 continue
@@ -199,6 +203,66 @@ class SchemaExtractor:
             by_routine.setdefault(r["routine"], []).append(sig)
         for proc in procedures:
             proc["parameters"] = by_routine.get(proc["name"], [])
+
+    # -- optional row / cardinality sampling -------------------------------
+    def quote_ident(self, name: str) -> str:
+        """Quote an identifier for this dialect (ANSI double quotes by default)."""
+        return '"' + name.replace('"', '""') + '"'
+
+    def qualified_table(self, schema: str, table: str) -> str:
+        return f"{self.quote_ident(schema)}.{self.quote_ident(table)}"
+
+    def _scalar(self, cursor, sql: str):
+        """Run a single-value query, returning None if the database refuses it."""
+        try:
+            cursor.execute(sql)
+            row = cursor.fetchone()
+        except Exception as exc:  # noqa: BLE001  # sampling is best-effort by design
+            log.warning("sampling query failed (%s): %s", sql, exc)
+            return None
+        if not row:
+            return None
+        value = row[0] if not isinstance(row, dict) else next(iter(row.values()))
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return None
+
+    def sample_statistics(self, cursor, schema: str, meta: SchemaMeta) -> None:
+        """Annotate tables with ``approxRows`` and columns with ``approxCardinality``.
+
+        Opt-in (``sample_rows`` > 0) because it issues one COUNT(*) per table and,
+        for tables at or below that ceiling, one COUNT(DISTINCT col) per column.
+        Any failing probe is logged and skipped — never fatal.
+        """
+        if self.sample_rows <= 0 or not _safe_ident(schema):
+            return
+        columns_by_table: dict[str, list[dict]] = {}
+        for col in meta.columns:
+            columns_by_table.setdefault(col.get("table", ""), []).append(col)
+
+        for table in meta.tables:
+            name = table.get("name", "")
+            if not _safe_ident(name):
+                continue
+            target = self.qualified_table(schema, name)
+            rows = self._scalar(cursor, f"SELECT COUNT(*) FROM {target}")
+            if rows is None:
+                continue
+            table["approxRows"] = rows
+            if rows > self.sample_rows:
+                log.debug("%s.%s has %d rows (> %d); skipping cardinality probes",
+                          schema, name, rows, self.sample_rows)
+                continue
+            for col in columns_by_table.get(name, []):
+                cname = col.get("name", "")
+                if not _safe_ident(cname):
+                    continue
+                distinct = self._scalar(
+                    cursor,
+                    f"SELECT COUNT(DISTINCT {self.quote_ident(cname)}) FROM {target}")
+                if distinct is not None:
+                    col["approxCardinality"] = distinct
 
     def extract_database(self, database: str) -> DatabaseMeta:
         conn = self.connect(database)
@@ -214,12 +278,13 @@ class SchemaExtractor:
                 self._attach_parameters(cursor, schema, sm.procedures)
                 try:
                     sm.indexes = [self.map_index(r) for r in self._rows(cursor, self.indexes_sql(schema))]
-                except Exception as exc:  # indexes are best-effort
+                except Exception as exc:  # noqa: BLE001  # indexes are best-effort; keep the rest of the schema
                     log.warning("index extraction failed for %s.%s: %s", database, schema, exc)
                 try:
                     sm.foreign_keys = [self.map_foreign_key(r) for r in self._rows(cursor, self.foreign_keys_sql(schema))]
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001  # FKs are best-effort; keep the rest of the schema
                     log.warning("FK extraction failed for %s.%s: %s", database, schema, exc)
+                self.sample_statistics(cursor, schema, sm)
                 meta.schemas.append(sm)
         finally:
             conn.close()
@@ -230,7 +295,12 @@ def _s(value: Any) -> str:
     return "" if value is None else str(value)
 
 
-def parse_index_columns(indexdef: str) -> List[str]:
+def _safe_ident(name: str) -> bool:
+    """Only plain identifiers may be interpolated into a sampling query."""
+    return bool(name) and bool(re.fullmatch(r"[A-Za-z_][A-Za-z0-9_$]*", name))
+
+
+def parse_index_columns(indexdef: str) -> list[str]:
     """Extract column names from a PostgreSQL CREATE INDEX definition."""
     match = re.search(r"\((.*)\)", indexdef or "")
     if not match:

@@ -1,8 +1,6 @@
 """PostgreSQL schema extractor."""
 from __future__ import annotations
 
-from typing import List, Tuple
-
 from .base import SchemaExtractor, parse_index_columns
 
 
@@ -33,16 +31,16 @@ class PostgresExtractor(SchemaExtractor):
         finally:
             conn.close()
 
-    def schemas(self, database: str, cursor) -> List[str]:
+    def schemas(self, database: str, cursor) -> list[str]:
         if self.schema_filter:
-            return self.schema_filter
+            return list(self.schema_filter)
         cursor.execute(
             "SELECT schema_name FROM information_schema.schemata "
             "WHERE schema_name NOT IN ('information_schema','pg_catalog','pg_toast')"
         )
         return [r[0] for r in cursor.fetchall()]
 
-    def indexes_sql(self, schema: str) -> Tuple[str, tuple]:
+    def indexes_sql(self, schema: str) -> tuple[str, tuple]:
         return (
             "SELECT tablename AS table_name, indexname AS name, indexdef AS indexdef "
             f"FROM pg_indexes WHERE schemaname = {self.placeholder} "
