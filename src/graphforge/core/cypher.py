@@ -28,8 +28,7 @@ def escape_cypher_string(value: str | None) -> str:
     value = value.replace("'", "\\'")
     value = value.replace("\n", "\\n")
     value = value.replace("\r", "\\r")
-    value = value.replace("\t", "\\t")
-    return value
+    return value.replace("\t", "\\t")
 
 
 def lit(value: Any) -> str:
