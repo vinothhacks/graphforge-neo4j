@@ -1,0 +1,92 @@
+# =============================================================================
+# graphforge local playground:  Neo4j 5  +  PostgreSQL 16 (auto-seeded)
+#
+#   docker compose -f examples/docker-compose.yml up -d --wait
+#
+#   graphforge init  --neo4j-uri bolt://127.0.0.1:7687 \
+#                    --neo4j-user neo4j --neo4j-password graphforge-playground
+#   graphforge db    --url postgresql://graphforge:graphforge-playground@127.0.0.1:5432/shopdb \
+#                    --neo4j-password graphforge-playground
+#   graphforge git   . --name graphforge --neo4j-password graphforge-playground
+#   graphforge link  --neo4j-password graphforge-playground
+#   graphforge ui    --neo4j-password graphforge-playground   # http://localhost:8000
+#
+#   docker compose -f examples/docker-compose.yml down -v     # -v also drops the seed
+#
+# (Put the credentials in a .env instead of repeating --neo4j-password; see
+# .env.example. They are spelled out above so the walkthrough is copy-pasteable
+# with nothing configured.)
+#
+# HOW THIS DIFFERS FROM THE OTHER TWO COMPOSE FILES — do not merge them:
+#
+#   ../docker-compose.yml       the minimal "just give me a Neo4j to write into"
+#                               stack: Neo4j only, APOC enabled, NAMED VOLUMES so
+#                               your graph survives a restart. Use it for real work.
+#
+#   ../docker-compose.ci.yml    the throwaway stack CI drives through
+#                               scripts/integration_test.sh: no APOC (proving the
+#                               link passes need no plugins), no persistence, tiny
+#                               heap, healthchecks tuned for a GitHub runner. Use
+#                               it to reproduce a CI failure, not to explore.
+#
+#   THIS FILE                   a playground: Neo4j AND a PostgreSQL that seeds
+#                               itself with a small shop schema (examples/seed/),
+#                               so `graphforge db` and `graphforge link` have
+#                               something real to chew on within a minute of
+#                               `up`. Persists, so you can come back to it.
+#
+# The credentials below are literal, public and throwaway; the ports bind to
+# localhost only. Never copy these values into anything that matters.
+# =============================================================================
+name: graphforge-playground
+
+services:
+  neo4j:
+    image: neo4j:5-community
+    container_name: graphforge-playground-neo4j
+    ports:
+      - "127.0.0.1:7474:7474"   # HTTP — Neo4j Browser
+      - "127.0.0.1:7687:7687"   # Bolt
+    environment:
+      # format is user/password
+      NEO4J_AUTH: neo4j/graphforge-playground
+      NEO4J_server_memory_heap_initial__size: 512m
+      NEO4J_server_memory_heap_max__size: 2G
+      NEO4J_server_default__listen__address: 0.0.0.0
+    healthcheck:
+      # cypher-shell ships inside the image, so this proves Bolt is actually
+      # serving queries — not merely that a port is open.
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p graphforge-playground 'RETURN 1' || exit 1"]
+      interval: 5s
+      timeout: 10s
+      retries: 40
+      start_period: 20s
+    volumes:
+      - playground_neo4j_data:/data
+      - playground_neo4j_logs:/logs
+
+  postgres:
+    image: postgres:16-alpine
+    container_name: graphforge-playground-postgres
+    ports:
+      - "127.0.0.1:5432:5432"
+    environment:
+      POSTGRES_USER: graphforge
+      POSTGRES_PASSWORD: graphforge-playground
+      POSTGRES_DB: shopdb
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U graphforge -d shopdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
+    volumes:
+      # Every *.sql here runs once, in filename order, on the FIRST start of an
+      # empty data volume. `down -v` is what makes it run again.
+      - ./seed:/docker-entrypoint-initdb.d:ro
+      - playground_pg_data:/var/lib/postgresql/data
+
+volumes:
+  playground_neo4j_data:
+  playground_neo4j_logs:
+  playground_pg_data:

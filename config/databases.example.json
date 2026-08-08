@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to config/databases.json (gitignored) and edit. `graphforge db ingest -c config/databases.json`. Passwords should come from the environment, not this file: set DB_PASSWORD or the per-source `passwordEnv` variable named here.",
+  "_comment": "Copy to config/databases.json (gitignored) and edit, then run `graphforge db -c config/databases.json`. Or skip the file and use a URL: `graphforge db --url postgresql://user@host:5432/dbname`. Passwords should come from the environment, not this file: set DB_PASSWORD or the per-source `passwordEnv` variable named here.",
   "sources": [
     {
       "engine": "mysql",

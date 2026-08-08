@@ -1,5 +1,5 @@
 {
-  "_comment": "Copy to config/repositories.json (gitignored) and edit. `graphforge git ingest -c config/repositories.json` reads this. You can also point at a single repo with `graphforge git ingest --url <git-url>` and skip the file entirely.",
+  "_comment": "Copy to config/repositories.json (gitignored) and edit. `graphforge git -c config/repositories.json` reads this. You can also skip the file entirely and pass repos positionally: `graphforge git <git-url-or-local-path> --name my-service`.",
   "defaultBranch": "main",
   "repositories": [
     {
