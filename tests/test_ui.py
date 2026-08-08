@@ -33,9 +33,39 @@ def test_degrades_gracefully_without_neo4j():
     assert "config" in st  # config still shown
 
 
-def test_dashboard_html_is_self_contained():
+def _dashboard_html():
     import graphforge.ui.server as srv
-    html = (Path(srv.__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+    return (Path(srv.__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+
+
+def test_dashboard_html_is_self_contained():
+    html = _dashboard_html()
     assert "graphforge" in html
     assert "/api/status" in html
     assert "http" not in html.split("</style>")[0] or "cdn" not in html.lower()  # no external CDN
+
+
+def test_dashboard_html_has_no_external_references_at_all():
+    """No CDN, no absolute URL, no external stylesheet/script/font — one file, zero network."""
+    html = _dashboard_html()
+    low = html.lower()
+    for needle in ("cdn", "http", "://", "@import", "integrity=", "crossorigin",
+                   "unpkg", "jsdelivr", "googleapis", "//fonts"):
+        assert needle not in low, f"dashboard.html references {needle!r}"
+    assert "<script src" not in low.replace("\n", " ")
+    assert "<link" not in low  # no external stylesheet or preconnect
+
+
+def test_dashboard_html_ships_the_vanilla_enhancements():
+    html = _dashboard_html()
+    # every endpoint the dashboard talks to is same-origin and relative
+    for endpoint in ("/api/status", "/api/schema", "/api/query",
+                     "/api/graph/sample", "/api/search?q=", "/api/labels/", "/api/node/"):
+        assert endpoint in html, endpoint
+    assert "<canvas" in html and "requestAnimationFrame" in html   # force-directed viz
+    assert "localStorage" in html                                   # theme + query history
+    assert ":root.light" in html                                    # readable light theme
+    assert "<noscript>" in html                                     # degrades without JS
+    assert 'class="skel"' in html or "skel" in html                 # shimmer loading states
+    assert "<textarea" in html                                      # cypher console
+    assert "modal" in html                                          # label explorer
