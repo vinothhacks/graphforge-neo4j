@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 import os
 import subprocess
-from typing import Optional, Tuple
 from urllib.parse import quote, urlparse, urlunparse
 
 log = logging.getLogger("graphforge.git.clone")
@@ -46,10 +45,10 @@ class GitHandler:
         return urlunparse(parts._replace(netloc=netloc))
 
     @staticmethod
-    def _run(args, cwd: Optional[str] = None, timeout: int = 900) -> Tuple[int, str, str]:
+    def _run(args, cwd: str | None = None, timeout: int = 900) -> tuple[int, str, str]:
         proc = subprocess.run(
             ["git", *args], cwd=cwd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout,
+            encoding="utf-8", errors="replace", timeout=timeout, check=False,
         )
         return proc.returncode, proc.stdout, proc.stderr
 
@@ -67,7 +66,7 @@ class GitHandler:
         return os.path.isdir(os.path.join(self.repo_path(name), ".git"))
 
     # -- operations --------------------------------------------------------
-    def clone(self, url: str, name: str, branch: Optional[str] = None) -> str:
+    def clone(self, url: str, name: str, branch: str | None = None) -> str:
         dest = self.repo_path(name)
         args = ["clone"]
         if branch:
@@ -79,7 +78,7 @@ class GitHandler:
         log.info("Cloned %s", name)
         return dest
 
-    def update(self, name: str, branch: Optional[str] = None) -> str:
+    def update(self, name: str, branch: str | None = None) -> str:
         dest = self.repo_path(name)
         self._run(["fetch", "--all", "--tags", "--prune"], cwd=dest)
         if branch:
@@ -89,7 +88,7 @@ class GitHandler:
             log.warning("pull for %s reported: %s", name, err.strip())
         return dest
 
-    def clone_or_update(self, url: str, name: str, branch: Optional[str] = None) -> str:
+    def clone_or_update(self, url: str, name: str, branch: str | None = None) -> str:
         if self.is_cloned(name):
             return self.update(name, branch)
         return self.clone(url, name, branch)

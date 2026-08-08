@@ -7,7 +7,7 @@ name = "graphforge-neo4j"
 version = "0.1.0"
 description = "Convert Git repositories and relational databases into a Neo4j knowledge graph, queryable over MCP."
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "vinothhacks" }]
 maintainers = [{ name = "vinothhacks" }]
@@ -17,10 +17,10 @@ classifiers = [
     "Development Status :: 4 - Beta",
     "Intended Audience :: Developers",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Topic :: Software Development :: Libraries",
@@ -43,7 +43,15 @@ dependencies = [
 
 [project.optional-dependencies]
 mcp = ["mcp>=1.2.0"]
-dev = ["pytest>=7.4", "ruff>=0.5", "build>=1.0", "twine>=5.0"]
+dev = [
+    "pytest>=7.4",
+    "pytest-cov>=4.1",
+    "ruff>=0.5",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "build>=1.0",
+    "twine>=5.0",
+]
 all = ["mcp>=1.2.0"]
 
 [project.scripts]
@@ -67,12 +75,141 @@ pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
-# These modernization rules suggest syntax that requires Python 3.10+
-# (PEP 604 `X | None` annotations) at runtime. The project supports 3.9, so
-# we keep the `typing.List`/`Optional` style until the minimum version moves.
-# BLE001 is intentional: several call sites catch broadly to degrade gracefully.
-# TODO: drop these ignores and adopt modern syntax once Python 3.9 is dropped.
-ignore = ["UP006", "UP035", "UP045", "BLE001", "ISC004", "SIM102", "SIM115", "PLW1510", "PYI034", "RUF012", "PIE810", "C408", "FURB167", "FURB188", "RUF100"]
+# ---------------------------------------------------------------------------
+# `select` is REQUIRED for any of this to mean anything. Without it ruff only
+# runs its own defaults (E4, E7, E9, F) and every entry in `ignore` below is
+# decorative — which is exactly the state this file used to be in.
+#
+# NOTE: this list has never been executed against the tree (the authoring
+# environment has no ruff binary), so it was chosen from a static survey of the
+# source rather than from a real run. The CI `lint` job is deliberately
+# `continue-on-error: true` for that reason — read the first run's output, trim
+# whatever is noisy, then flip the job to blocking. See .github/workflows/ci.yml.
+# ---------------------------------------------------------------------------
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings (trailing whitespace, bad escapes)
+    "F",    # pyflakes (unused imports/names, undefined names)
+    "I",    # isort — import ordering, auto-fixable
+    "UP",   # pyupgrade — keeps the 3.10+ modernization from regressing
+    "B",    # flake8-bugbear
+    "BLE",  # flake8-blind-except — the `# noqa: BLE001` comments in src/ need this
+    "C4",   # flake8-comprehensions
+    "PIE",  # flake8-pie
+    "RET",  # flake8-return
+    "SIM",  # flake8-simplify — the `# noqa: SIM115` in core/neo4j_writer.py needs this
+    "PYI",  # flake8-pyi — the PYI034 ignore below needs this
+    "RUF",  # ruff-specific (RUF012 ClassVar, etc.)
+]
+
+# Deliberately NOT selected, with reasons:
+#   ARG  — 6 unused-argument sites are abstract/overridable hooks in db/base.py,
+#          db/postgres.py, db/mssql.py and link/passes.py::maps_to. Enabling it
+#          would require source changes, not config.
+#   PTH  — 24 os.path call sites; a pathlib migration is its own change.
+#   SLF  — 6 deliberate private-API reads in ui/server.py (`g._read(...)`).
+#   S / T20 / PL / N / D — high-volume style rules; adopt one at a time later.
+#   COM / ISC001 — conflict with `ruff format`.
+
+ignore = [
+    # `__enter__` should return `Self`, but `typing.Self` is 3.11+ and this
+    # package supports 3.10. Revisit when the floor moves to 3.11.
+    "PYI034",
+
+    # Line length is owned by `ruff format`, not by the linter. 58 lines in
+    # src/ and 11 in tests/ currently exceed 100 columns (mostly wrapped Cypher
+    # and SQL string literals, where a hard break hurts readability).
+    "E501",
+
+    # `zip(..., strict=)`. Two sites: db/base.py::_rows and db/vds.py, both
+    # `dict(zip(cols, row))` over a cursor description, where the lengths are
+    # guaranteed equal. Fixing needs a src/ edit.
+    "B905",
+
+    # Ambiguous-unicode rules. src/ intentionally uses typographic punctuation
+    # in docstrings and comments: 67 em-dashes, 10 ellipses, 5 arrows, 6 bullets.
+    "RUF001",
+    "RUF002",
+    "RUF003",
+
+    # Unused-`noqa` detection. git/ingest.py carries `# noqa: SLF001`, and SLF
+    # is not selected (see above), so RUF100 would flag it as unused. Re-enable
+    # this together with SLF.
+    "RUF100",
+]
+
+[tool.ruff.lint.per-file-ignores]
+# Tests get a longer leash: assertions are the point, fixtures are frequently
+# requested for their side effects, and internals are fair game.
+"tests/**" = [
+    "S101",     # assert
+    "E501",     # long expected-value literals
+    "ARG001",   # unused fixture argument
+    "ARG002",
+    "SLF001",   # tests may reach into private helpers
+    "PLR2004",  # magic values in assertions
+    "B011",     # assert False
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["graphforge"]
+
+# ---------------------------------------------------------------------------
+# Coverage  (pytest --cov=graphforge --cov-report=xml --cov-report=term)
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+source = ["src"]
+branch = true
+parallel = false
+relative_files = true
+omit = [
+    "*/graphforge/__main__.py",   # a two-line `sys.exit(main())` shim
+]
+
+[tool.coverage.paths]
+# Lets a report produced against an editable/installed copy line up with the
+# checkout, so the XML the CI job uploads points at real repo paths.
+source = ["src/graphforge", "*/site-packages/graphforge"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+# No enforced floor yet: the current number has never been measured in CI, and a
+# guessed threshold would either be trivially passed or would fail the build for
+# reasons unrelated to the change under review. Measure with the `coverage` job
+# first, then set `fail_under` a few points below the observed baseline (~70 is
+# the intended target) and let it ratchet up.
+fail_under = 0
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "@(abc\\.)?abstractmethod",
+    "class .*\\(Protocol\\):",
+]
+
+# ---------------------------------------------------------------------------
+# mypy — deliberately lenient. This is a "does it type-check at all" gate, not
+# a strictness campaign. Tighten one flag at a time.
+# ---------------------------------------------------------------------------
+[tool.mypy]
+python_version = "3.10"
+mypy_path = "src"
+packages = ["graphforge"]
+ignore_missing_imports = true      # neo4j, psycopg2, pyodbc, mcp, tqdm ship no stubs
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+check_untyped_defs = false
+warn_return_any = false
+warn_unused_ignores = false
+warn_unused_configs = true
+no_implicit_optional = true
+show_error_codes = true
+pretty = true
+# Tests are excluded for now: they use a lot of duck-typed fakes that would
+# generate noise without finding real bugs. Drop this once src/ is clean.
+exclude = ['^tests/', '^build/', '^dist/', '^examples/']

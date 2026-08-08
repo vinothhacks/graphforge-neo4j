@@ -2,13 +2,12 @@
 from __future__ import annotations
 
 import logging
-from typing import List
 
 log = logging.getLogger("graphforge.git.discover")
 
 
 def gitlab_group_repos(server: str, group_id: str, token: str = "",
-                       default_branch: str = "main", since_days: int = 0) -> List[dict]:
+                       default_branch: str = "main", since_days: int = 0) -> list[dict]:
     """Return repo specs for every project in a GitLab group (incl. subgroups).
 
     If ``since_days`` > 0, only projects with activity in that window are
@@ -26,7 +25,7 @@ def gitlab_group_repos(server: str, group_id: str, token: str = "",
     if since_days and since_days > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
         params_base["last_activity_after"] = cutoff.isoformat()
-    specs: List[dict] = []
+    specs: list[dict] = []
     page = 1
     while True:
         resp = requests.get(

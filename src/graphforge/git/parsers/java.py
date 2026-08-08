@@ -9,7 +9,7 @@ per-class annotations *with their arguments*, a framework **stereotype**
 from __future__ import annotations
 
 import re
-from typing import Any, Dict, List
+from typing import Any
 
 _PACKAGE = re.compile(r"^package\s+([\w.]+)\s*;")
 _IMPORT = re.compile(r"^import\s+(?:static\s+)?([\w.]+)(?:\.\*)?\s*;")
@@ -36,13 +36,13 @@ _STEREOTYPES = {
 }
 
 
-def extract(lines: List[str]) -> Dict[str, Any]:
-    result: Dict[str, Any] = {
+def extract(lines: list[str]) -> dict[str, Any]:
+    result: dict[str, Any] = {
         "package": "", "imports": [], "classes": [], "interfaces": [],
         "enums": [], "methods": [], "annotations": [],
     }
     in_block_comment = False
-    pending: List[Dict[str, str]] = []  # annotations awaiting the next declaration
+    pending: list[dict[str, str]] = []  # annotations awaiting the next declaration
 
     for i, raw in enumerate(lines, 1):
         line = raw.strip()
@@ -127,14 +127,14 @@ def _visibility(line: str) -> str:
     return "package"
 
 
-def _stereotype(pending: List[Dict[str, str]]) -> str:
+def _stereotype(pending: list[dict[str, str]]) -> str:
     for ann in pending:
         if ann["name"] in _STEREOTYPES:
             return _STEREOTYPES[ann["name"]]
     return ""
 
 
-def _mapped_table(pending: List[Dict[str, str]], class_name: str) -> str:
+def _mapped_table(pending: list[dict[str, str]], class_name: str) -> str:
     """Return the JPA table this class maps to, or '' if it is not an entity.
 
     @Table(name="X") wins; otherwise an @Entity defaults to the class name.

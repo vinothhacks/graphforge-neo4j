@@ -14,13 +14,13 @@ from __future__ import annotations
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass, field
-from typing import Any, Dict, Optional
+from typing import Any
 
 # ---------------------------------------------------------------------------
 # Literal rendering (only used for script output; the driver uses parameters)
 # ---------------------------------------------------------------------------
 
-def escape_cypher_string(value: Optional[str]) -> str:
+def escape_cypher_string(value: str | None) -> str:
     """Escape a Python string for use inside a single-quoted Cypher literal."""
     if value is None:
         return ""
@@ -57,7 +57,7 @@ class Operation:
     """A single parameterized Cypher statement plus its parameters."""
 
     cypher: str
-    params: Dict[str, Any] = field(default_factory=dict)
+    params: dict[str, Any] = field(default_factory=dict)
     comment: str = ""
 
     def to_script(self) -> str:
@@ -100,13 +100,13 @@ def _label(name: str) -> str:
 def merge_node(
     label: str,
     key: Mapping[str, Any],
-    props: Optional[Mapping[str, Any]] = None,
+    props: Mapping[str, Any] | None = None,
     comment: str = "",
 ) -> Operation:
     """MERGE a node on ``key`` and SET the remaining ``props``."""
     _label(label)
     key_frag = ", ".join(f"{_ident(k)}: $k_{k}" for k in key)
-    params: Dict[str, Any] = {f"k_{k}": v for k, v in key.items()}
+    params: dict[str, Any] = {f"k_{k}": v for k, v in key.items()}
     cypher = f"MERGE (n:{label} {{{key_frag}}})"
     if props:
         set_frag = ", ".join(f"n.{_ident(k)} = $p_{k}" for k in props)
@@ -129,7 +129,7 @@ def merge_rel(
     start: NodeRef,
     rel_type: str,
     end: NodeRef,
-    props: Optional[Mapping[str, Any]] = None,
+    props: Mapping[str, Any] | None = None,
     comment: str = "",
 ) -> Operation:
     """MATCH two nodes and MERGE a ``rel_type`` relationship between them."""
@@ -138,7 +138,7 @@ def merge_rel(
     _label(rel_type)
     a_frag = ", ".join(f"{_ident(k)}: $a_{k}" for k in start.key)
     b_frag = ", ".join(f"{_ident(k)}: $b_{k}" for k in end.key)
-    params: Dict[str, Any] = {f"a_{k}": v for k, v in start.key.items()}
+    params: dict[str, Any] = {f"a_{k}": v for k, v in start.key.items()}
     params.update({f"b_{k}": v for k, v in end.key.items()})
     cypher = (
         f"MATCH (a:{start.label} {{{a_frag}}})\n"

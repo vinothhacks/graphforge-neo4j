@@ -4,28 +4,218 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # ---------------------------------------------------------------------------
+  # The gate. Everything else is advisory until it has proved itself once.
+  # ---------------------------------------------------------------------------
   test:
+    name: test (py${{ matrix.python-version }})
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13"]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+          cache-dependency-path: pyproject.toml
       - name: Install
-        run: pip install -e ".[dev]"
-      - name: Lint
-        run: ruff check src tests
+        run: python -m pip install -e ".[dev]"
       - name: Test
         run: pytest -q
 
-  secret-scan:
+  # ---------------------------------------------------------------------------
+  # Coverage. Measures only - there is deliberately no fail-under yet, see the
+  # comment on [tool.coverage.report] in pyproject.toml. Read the XML artifact
+  # (or the term report in the log) for a few runs, then set a floor.
+  # ---------------------------------------------------------------------------
+  coverage:
+    name: coverage
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Test with coverage
+        run: pytest --cov=graphforge --cov-report=xml --cov-report=term
+      - name: Upload coverage.xml
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: error
+          retention-days: 14
+
+  # ---------------------------------------------------------------------------
+  # Lint.
+  #
+  # NON-BLOCKING ON PURPOSE. [tool.ruff.lint].select in pyproject.toml was
+  # authored offline, without a ruff binary available to run it, so the rule set
+  # is an educated guess based on a static survey of the tree rather than a
+  # verified-clean configuration.
+  #
+  # TO MAKE THIS BLOCKING: read the first run's output, trim `select` / extend
+  # `ignore` in pyproject.toml until `ruff check src tests` is clean, then delete
+  # the `continue-on-error: true` line below.
+  #
+  # `ruff format --diff` is informational only: the tree has never been
+  # formatted, so it will report a large diff on the first run. Do the
+  # reformat as its own isolated commit before turning this into `--check`.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: lint (ruff, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # Pinned to the same version as .pre-commit-config.yaml so a local
+      # `pre-commit run` and CI cannot disagree about what "clean" means.
+      - name: Install ruff
+        run: python -m pip install "ruff==0.8.6"
+      - name: ruff check
+        run: ruff check --output-format=github src tests
+      - name: ruff format (report only)
+        run: ruff format --diff src tests
+
+  # ---------------------------------------------------------------------------
+  # Type checking.
+  #
+  # NON-BLOCKING ON PURPOSE. [tool.mypy] in pyproject.toml has never been
+  # executed against this tree; the settings are lenient but the baseline error
+  # count is unknown.
+  #
+  # TO MAKE THIS BLOCKING: get the run to zero errors (fix, or add targeted
+  # `# type: ignore[code]` / per-module overrides), then delete the
+  # `continue-on-error: true` line below.
+  # ---------------------------------------------------------------------------
+  types:
+    name: types (mypy, non-blocking)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"   # the floor: catches 3.11+-only syntax
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      # Targets are configured in pyproject.toml (mypy_path = src, packages = graphforge).
+      - name: mypy
+        run: mypy
+
+  # ---------------------------------------------------------------------------
+  # Packaging. Same build the release workflow runs, on every push, so a broken
+  # sdist/wheel is caught long before someone cuts a tag.
+  # ---------------------------------------------------------------------------
+  build:
+    name: build + metadata check
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build sdist + wheel
+        run: |
+          python -m pip install --upgrade build twine
+          python -m build
+      - name: Check metadata
+        run: python -m twine check --strict dist/*
+      - name: Smoke-test the wheel
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/python -m pip install --quiet dist/*.whl
+          /tmp/smoke/bin/graphforge --version
+          /tmp/smoke/bin/graphforge --help > /dev/null
+      - name: Upload dist
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-ci
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # End-to-end against real Neo4j + PostgreSQL.
+  #
+  # Deliberately NOT run on pull requests: it pulls two container images and
+  # takes minutes. Pushes to main and manual dispatch only.
+  #
+  # NON-BLOCKING ON PURPOSE. scripts/integration_test.sh was authored in an
+  # environment with no docker and no network, so it has never been executed
+  # end to end. Its shell syntax, its embedded Python/XML, and the Java fixture
+  # it writes were all validated statically (`bash -n`, `compile()`,
+  # ElementTree, and graphforge's own java parser + link matcher), but a green
+  # run is still unproven.
+  #
+  # TO MAKE THIS BLOCKING: dispatch it manually, fix whatever it finds, then
+  # delete the `continue-on-error: true` line below.
+  # ---------------------------------------------------------------------------
+  integration:
+    name: integration (real Neo4j + PostgreSQL, non-blocking)
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      # Runtime deps only: this test drives the installed console script, and
+      # its probes reuse graphforge's own psycopg2 / neo4j drivers.
+      - name: Install graphforge
+        run: python -m pip install -e .
+      - name: Start Neo4j 5 + PostgreSQL 16
+        run: docker compose -f docker-compose.ci.yml up -d --wait
+      # Invoked via `bash` rather than `./` so the test does not depend on the
+      # executable bit surviving in the git index (this repo is developed on
+      # Windows with core.filemode=false).
+      - name: Run the end-to-end test
+        run: bash scripts/integration_test.sh
+      - name: Service logs
+        if: failure()
+        run: docker compose -f docker-compose.ci.yml logs --no-color --tail=300
+      - name: Tear down
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v
+
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    name: secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
       - name: Fail on obvious secrets

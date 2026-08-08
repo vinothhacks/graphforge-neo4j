@@ -8,5 +8,5 @@ try:
     from importlib.metadata import version
 
     __version__ = version("graphforge-neo4j")
-except Exception:  # not installed (source/editable/dev) — fall back to the literal
+except ImportError:  # not installed (source/editable/dev) — fall back to the literal
     __version__ = "0.1.0"

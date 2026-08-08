@@ -54,7 +54,7 @@ def classify_line(content: str, ext: str) -> str:
             return "comment"
         if stripped.startswith(("/*", "*", "*/")):
             return "comment"
-        if stripped.startswith("import ") or stripped.startswith("#include"):
+        if stripped.startswith(("import ", "#include")):
             return "import"
         if stripped.startswith("package "):
             return "package"
@@ -69,12 +69,10 @@ def classify_line(content: str, ext: str) -> str:
         if ext == ".py" and stripped.startswith(("import ", "from ")):
             return "import"
 
-    if ext in (".xml", ".xhtml", ".html", ".htm"):
-        if stripped.startswith("<!--"):
-            return "comment"
+    if ext in (".xml", ".xhtml", ".html", ".htm") and stripped.startswith("<!--"):
+        return "comment"
 
-    if ext in (".css", ".scss", ".sass", ".less"):
-        if stripped.startswith(("/*", "//")):
-            return "comment"
+    if ext in (".css", ".scss", ".sass", ".less") and stripped.startswith(("/*", "//")):
+        return "comment"
 
     return "code"

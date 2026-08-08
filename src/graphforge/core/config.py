@@ -7,29 +7,28 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from typing import List, Optional
 
 try:
     from dotenv import load_dotenv
-except Exception:  # pragma: no cover - dotenv is a core dep but keep import soft
+except ImportError:  # pragma: no cover - dotenv is a core dep but keep import soft
     def load_dotenv(*_args, **_kwargs):  # type: ignore
         return False
 
 
-def _bool(value: Optional[str], default: bool = False) -> bool:
+def _bool(value: str | None, default: bool = False) -> bool:
     if value is None:
         return default
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
-def _int(value: Optional[str], default: int) -> int:
+def _int(value: str | None, default: int) -> int:
     try:
         return int(str(value).strip())
     except (TypeError, ValueError):
         return default
 
 
-def _csv(value: Optional[str]) -> List[str]:
+def _csv(value: str | None) -> list[str]:
     if not value:
         return []
     return [item.strip() for item in value.split(",") if item.strip()]
@@ -90,9 +89,9 @@ class DbSettings:
     port: int = 3306
     user: str = ""
     password: str = ""
-    names: List[str] = field(default_factory=list)
+    names: list[str] = field(default_factory=list)
     mssql_driver: str = "ODBC Driver 18 for SQL Server"
-    pg_schemas: List[str] = field(default_factory=lambda: ["public"])
+    pg_schemas: list[str] = field(default_factory=lambda: ["public"])
 
     @classmethod
     def from_env(cls) -> DbSettings:
@@ -115,7 +114,7 @@ class Settings:
     db: DbSettings = field(default_factory=DbSettings)
 
 
-def load_settings(env_file: Optional[str] = None) -> Settings:
+def load_settings(env_file: str | None = None) -> Settings:
     """Load settings from the environment, seeding from a .env file if present."""
     load_dotenv(dotenv_path=env_file, override=False)
     return Settings(

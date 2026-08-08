@@ -14,7 +14,6 @@ mapping is unit-testable without a live database.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Optional
 
 from ..core.cypher import NodeRef, Operation, merge_node, merge_rel
 from ..core.neo4j_writer import Neo4jWriter, load_schema
@@ -41,7 +40,7 @@ def _db_id(engine: str, host: str, name: str) -> str:
 
 
 class VdsIngestor:
-    def __init__(self, writer: Neo4jWriter, config: Optional[VdsConfig] = None):
+    def __init__(self, writer: Neo4jWriter, config: VdsConfig | None = None):
         self.writer = writer
         self.cfg = config or VdsConfig()
 
@@ -49,7 +48,7 @@ class VdsIngestor:
         self.writer.apply_schema(load_schema("vds_schema.cypher"))
 
     # -- live fetch --------------------------------------------------------
-    def _fetch(self, conn) -> List[dict]:
+    def _fetch(self, conn) -> list[dict]:
         c = self.cfg
         sql = (
             f"SELECT sc.{c.sid} AS sid, sc.{c.service_name} AS servicename, "
@@ -68,7 +67,7 @@ class VdsIngestor:
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
     def ingest(self, engine: str, host: str, port: int, user: str, password: str,
-               database: str, driver: Optional[str] = None) -> Dict[str, int]:
+               database: str, driver: str | None = None) -> dict[str, int]:
         from . import get_extractor
 
         ex = get_extractor(engine, host=host, port=port, user=user,
@@ -81,9 +80,9 @@ class VdsIngestor:
         return self.write_rows(rows, engine, host, database)
 
     # -- pure mapping ------------------------------------------------------
-    def write_rows(self, rows: List[dict], engine: str, host: str, database: str) -> Dict[str, int]:
+    def write_rows(self, rows: list[dict], engine: str, host: str, database: str) -> dict[str, int]:
         db_id = _db_id(engine, host, database)
-        ops: List[Operation] = []
+        ops: list[Operation] = []
         services, queries, wheres = set(), set(), set()
 
         for r in rows:

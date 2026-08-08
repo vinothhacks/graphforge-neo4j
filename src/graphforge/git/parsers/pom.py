@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
-from typing import Any, Dict
+from typing import Any
 
 _NS = {"m": "http://maven.apache.org/POM/4.0.0"}
 
@@ -16,15 +16,16 @@ def _text(element, path: str) -> str:
     return (found.text or "").strip() if found is not None else ""
 
 
-def parse_pom(pom_path: str) -> Dict[str, Any]:
+def parse_pom(pom_path: str) -> dict[str, Any]:
     """Return groupId/artifactId/version/packaging/name + dependency list."""
-    result: Dict[str, Any] = {
+    result: dict[str, Any] = {
         "groupId": "", "artifactId": "", "version": "",
         "packaging": "jar", "name": "", "dependencies": [],
     }
     try:
         root = ET.parse(pom_path).getroot()
-    except Exception:
+    except (ET.ParseError, OSError):
+        # Unreadable or malformed pom: degrade to empty coordinates.
         return result
 
     result["groupId"] = _text(root, "groupId")
