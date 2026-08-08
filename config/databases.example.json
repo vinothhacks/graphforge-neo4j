@@ -1,0 +1,31 @@
+{
+  "_comment": "Copy to config/databases.json (gitignored) and edit. `graphforge db ingest -c config/databases.json`. Passwords should come from the environment, not this file: set DB_PASSWORD or the per-source `passwordEnv` variable named here.",
+  "sources": [
+    {
+      "engine": "mysql",
+      "host": "127.0.0.1",
+      "port": 3306,
+      "user": "readonly",
+      "passwordEnv": "MYSQL_RO_PASSWORD",
+      "databases": ["shop", "inventory"]
+    },
+    {
+      "engine": "postgres",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "user": "readonly",
+      "passwordEnv": "PG_RO_PASSWORD",
+      "databases": ["analytics"],
+      "schemas": ["public", "reporting"]
+    },
+    {
+      "engine": "mssql",
+      "host": "127.0.0.1",
+      "port": 1433,
+      "user": "readonly",
+      "passwordEnv": "MSSQL_RO_PASSWORD",
+      "driver": "ODBC Driver 18 for SQL Server",
+      "databases": ["Sales"]
+    }
+  ]
+}

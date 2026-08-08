@@ -1,0 +1,15 @@
+{
+  "_comment": "Copy to config/repositories.json (gitignored) and edit. `graphforge git ingest -c config/repositories.json` reads this. You can also point at a single repo with `graphforge git ingest --url <git-url>` and skip the file entirely.",
+  "defaultBranch": "main",
+  "repositories": [
+    {
+      "name": "example-service",
+      "url": "https://github.com/octocat/Hello-World.git",
+      "branch": "master"
+    },
+    {
+      "name": "local-checkout",
+      "path": "/absolute/path/to/an/already/cloned/repo"
+    }
+  ]
+}

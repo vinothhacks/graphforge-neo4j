@@ -1,0 +1,78 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "graphforge-neo4j"
+version = "0.1.0"
+description = "Convert Git repositories and relational databases into a Neo4j knowledge graph, queryable over MCP."
+readme = "README.md"
+requires-python = ">=3.9"
+license = { file = "LICENSE" }
+authors = [{ name = "vinothhacks" }]
+maintainers = [{ name = "vinothhacks" }]
+keywords = ["neo4j", "knowledge-graph", "git", "database", "mcp", "code-intelligence",
+            "mysql", "postgresql", "sqlserver", "impact-analysis"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Topic :: Software Development :: Libraries",
+    "Topic :: Database",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+
+# Batteries included: the Neo4j driver plus MySQL / PostgreSQL / SQL Server
+# drivers are installed by default so `pip install graphforge-neo4j` just works.
+# (SQL Server still needs a system ODBC driver at run time.)
+dependencies = [
+    "neo4j>=5.0.0",
+    "python-dotenv>=1.0.0",
+    "tqdm>=4.65.0",
+    "requests>=2.28.0",
+    "mysql-connector-python>=8.0",
+    "psycopg2-binary>=2.9",
+    "pyodbc>=5.0",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=1.2.0"]
+dev = ["pytest>=7.4", "ruff>=0.5", "build>=1.0", "twine>=5.0"]
+all = ["mcp>=1.2.0"]
+
+[project.scripts]
+graphforge = "graphforge.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/vinothhacks/graphforge-neo4j"
+Repository = "https://github.com/vinothhacks/graphforge-neo4j"
+Issues = "https://github.com/vinothhacks/graphforge-neo4j/issues"
+Changelog = "https://github.com/vinothhacks/graphforge-neo4j/blob/main/CHANGELOG.md"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+graphforge = ["schema/*.cypher", "ui/*.html", "py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py39"
+
+[tool.ruff.lint]
+# These modernization rules suggest syntax that requires Python 3.10+
+# (PEP 604 `X | None` annotations) at runtime. The project supports 3.9, so
+# we keep the `typing.List`/`Optional` style until the minimum version moves.
+# BLE001 is intentional: several call sites catch broadly to degrade gracefully.
+# TODO: drop these ignores and adopt modern syntax once Python 3.9 is dropped.
+ignore = ["UP006", "UP035", "UP045", "BLE001", "ISC004", "SIM102", "SIM115", "PLW1510", "PYI034", "RUF012", "PIE810", "C408", "FURB167", "FURB188", "RUF100"]

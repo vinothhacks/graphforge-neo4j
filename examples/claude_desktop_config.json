@@ -1,0 +1,15 @@
+{
+  "_comment": "Wire graphforge's MCP server into an MCP client (e.g. Claude Desktop). Merge this into the client's config, fill in your Neo4j password, then restart the client. Any MCP client that speaks stdio works the same way.",
+  "mcpServers": {
+    "graphforge": {
+      "command": "graphforge",
+      "args": ["mcp"],
+      "env": {
+        "NEO4J_URI": "bolt://127.0.0.1:7687",
+        "NEO4J_USER": "neo4j",
+        "NEO4J_PASSWORD": "please-change-me",
+        "NEO4J_DATABASE": "neo4j"
+      }
+    }
+  }
+}

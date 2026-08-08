@@ -1,0 +1,251 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>graphforge dashboard</title>
+<style>
+  :root {
+    --bg:#0b0f1a; --card:#141b2d; --card-2:#171f33; --line:#243049; --line-2:#2d3a57;
+    --fg:#e6ebf5; --muted:#8ea0c0; --muted-2:#6b7c9e; --accent:#5b8cff; --accent-2:#7aa0ff;
+    --accent-soft:rgba(91,140,255,.14); --ok:#2fbf71; --ok-soft:rgba(47,191,113,.14);
+    --bad:#ff5d6c; --bad-soft:rgba(255,93,108,.14); --warn:#f5a524; --warn-soft:rgba(245,165,36,.14);
+    --chip:#1b2440; --shadow:0 6px 24px rgba(0,0,0,.35); --radius:14px;
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:
+    radial-gradient(1200px 600px at 80% -10%, rgba(91,140,255,.10), transparent 60%),
+    radial-gradient(900px 500px at -10% 10%, rgba(47,191,113,.06), transparent 60%),
+    var(--bg); color:var(--fg); font:14px/1.5 -apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; }
+  header { display:flex; align-items:center; gap:14px; padding:16px 24px;
+    border-bottom:1px solid var(--line); position:sticky; top:0; z-index:10;
+    background:linear-gradient(180deg, rgba(15,20,32,.92), rgba(11,15,26,.82)); backdrop-filter:blur(8px); }
+  .logo { display:grid; place-items:center; width:38px; height:38px; border-radius:10px;
+    background:var(--accent-soft); border:1px solid var(--line); color:var(--accent); }
+  .logo svg { display:block; }
+  header h1 { font-size:17px; margin:0; letter-spacing:.2px; font-weight:650; }
+  header .sub { color:var(--muted); font-size:12px; margin-top:1px; }
+  .grow { flex:1; }
+  .toolbar { display:flex; align-items:center; gap:10px; }
+  .toggle { display:flex; align-items:center; gap:8px; color:var(--muted); font-size:12px;
+    background:var(--card); border:1px solid var(--line); border-radius:999px; padding:6px 12px; cursor:pointer; }
+  .toggle input { accent-color:var(--accent); cursor:pointer; }
+  button { background:var(--accent); color:#fff; border:0; border-radius:9px;
+    padding:8px 14px; font-size:13px; font-weight:600; cursor:pointer;
+    display:inline-flex; align-items:center; gap:7px; transition:filter .15s, transform .05s; }
+  button:hover { filter:brightness(1.10); }
+  button:active { transform:translateY(1px); }
+  button.ghost { background:transparent; color:var(--fg); border:1px solid var(--line); }
+  button.ghost:hover { background:var(--card); filter:none; }
+  .pill { padding:5px 12px; border-radius:999px; font-size:12px; font-weight:600;
+    display:inline-flex; align-items:center; gap:7px; }
+  .pill .dot { width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .pill.ok { background:var(--ok-soft); color:var(--ok); }
+  .pill.bad { background:var(--bad-soft); color:var(--bad); }
+  .pill.warn { background:var(--warn-soft); color:var(--warn); }
+  main { padding:24px; display:grid; gap:18px; max-width:1180px; margin:0 auto; }
+  .tiles { display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  .tile { position:relative; overflow:hidden; background:linear-gradient(180deg, var(--card-2), var(--card));
+    border:1px solid var(--line); border-radius:var(--radius); padding:18px 20px; box-shadow:var(--shadow); }
+  .tile::after { content:""; position:absolute; right:-30px; top:-30px; width:110px; height:110px;
+    border-radius:50%; background:radial-gradient(circle, var(--accent-soft), transparent 70%); }
+  .tile .top { display:flex; align-items:center; gap:10px; color:var(--muted); font-size:11px;
+    text-transform:uppercase; letter-spacing:.08em; font-weight:600; }
+  .tile .top svg { width:15px; height:15px; color:var(--accent); }
+  .tile .n { font-size:30px; font-weight:750; margin-top:10px; letter-spacing:-.5px; }
+  .tile .l { color:var(--muted-2); font-size:12px; margin-top:2px; }
+  .row { display:grid; grid-template-columns:1fr 1fr; gap:18px; }
+  @media (max-width:980px){ .tiles{ grid-template-columns:repeat(2,1fr); } }
+  @media (max-width:760px){ .row{ grid-template-columns:1fr; } }
+  .card { background:linear-gradient(180deg, var(--card-2), var(--card));
+    border:1px solid var(--line); border-radius:var(--radius); padding:18px; box-shadow:var(--shadow); }
+  .card h2 { font-size:12px; text-transform:uppercase; letter-spacing:.09em;
+    color:var(--muted); margin:0 0 14px; font-weight:650; display:flex; align-items:center; gap:8px; }
+  .card h2 .count { margin-left:auto; font-size:11px; color:var(--muted-2); font-weight:500; }
+  .kv { display:grid; grid-template-columns:118px 1fr; gap:7px 12px; font-size:13px; }
+  .kv div:nth-child(odd){ color:var(--muted); }
+  .kv code { color:var(--fg); word-break:break-all; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px; }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; }
+  .chip { background:var(--chip); border:1px solid var(--line); border-radius:999px;
+    padding:6px 12px; font-size:12px; display:inline-flex; align-items:center; gap:8px; }
+  .chip .bar { width:34px; height:5px; border-radius:3px; background:var(--line-2); overflow:hidden; }
+  .chip .bar > i { display:block; height:100%; background:linear-gradient(90deg, var(--accent), var(--accent-2)); }
+  .chip b { color:var(--accent); font-weight:650; }
+  table { width:100%; border-collapse:collapse; font-size:13px; }
+  th, td { text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.06em; }
+  tbody tr { transition:background .12s; }
+  tbody tr:hover { background:rgba(91,140,255,.05); }
+  tbody tr:last-child td { border-bottom:0; }
+  td.num { text-align:right; font-variant-numeric:tabular-nums; color:var(--muted); }
+  .badge { padding:3px 9px; border-radius:999px; font-size:11px; font-weight:600;
+    display:inline-flex; align-items:center; gap:6px; }
+  .badge .dot { width:6px; height:6px; border-radius:50%; background:currentColor; }
+  .badge.ok { background:var(--ok-soft); color:var(--ok); }
+  .badge.bad { background:var(--bad-soft); color:var(--bad); }
+  .badge.warn { background:var(--warn-soft); color:var(--warn); }
+  .badge.muted { background:rgba(110,124,158,.14); color:var(--muted); }
+  .banner { background:var(--bad-soft); border:1px solid rgba(255,93,108,.4);
+    color:#ffd0d5; border-radius:12px; padding:12px 16px; font-size:13px; }
+  .banner.ok { background:var(--ok-soft); border-color:rgba(47,191,113,.4); color:#bff0d3; }
+  .empty { color:var(--muted); font-size:13px; padding:18px 4px; text-align:center; }
+  .skel .line { height:14px; border-radius:6px; margin:8px 0;
+    background:linear-gradient(90deg, var(--card), var(--card-2), var(--card)); background-size:200% 100%;
+    animation:shimmer 1.4s linear infinite; }
+  @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+  footer { text-align:center; color:var(--muted-2); font-size:12px; padding:24px; }
+  .right { text-align:right; }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo" aria-hidden="true">
+    <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="5" cy="6" r="2.2"/><circle cx="19" cy="6" r="2.2"/><circle cx="12" cy="18" r="2.2"/>
+      <path d="M7 7.4l4 9.2M17 7.4l-4 9.2M7 6h10"/>
+    </svg>
+  </div>
+  <div>
+    <h1>graphforge</h1>
+    <div class="sub">knowledge-graph dashboard</div>
+  </div>
+  <span class="grow"></span>
+  <div class="toolbar">
+    <label class="toggle" title="Auto-refresh every 10s">
+      <input type="checkbox" id="auto" /> auto
+    </label>
+    <span id="conn" class="pill warn"><span class="dot"></span>checking…</span>
+    <button class="ghost" onclick="load()" title="Reload status">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><path d="M21 3v6h-6"/></svg>
+      Refresh
+    </button>
+  </div>
+</header>
+
+<main>
+  <div id="banner"></div>
+  <div class="tiles" id="tiles"></div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Neo4j</h2>
+      <div class="kv" id="neo4j-cfg"></div>
+    </div>
+    <div class="card">
+      <h2>Database source</h2>
+      <div class="kv" id="db-cfg"></div>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Nodes by label <span class="count" id="labels-count"></span></h2>
+    <div class="chips" id="labels"></div>
+  </div>
+
+  <div class="row">
+    <div class="card">
+      <h2>Repositories <span class="count" id="repos-count"></span></h2>
+      <table><thead><tr><th>Repo</th><th>Status</th><th class="right">Files</th><th class="right">Commits</th></tr></thead>
+      <tbody id="repos"></tbody></table>
+      <div class="empty" id="repos-empty" hidden>None ingested yet.</div>
+    </div>
+    <div class="card">
+      <h2>Databases <span class="count" id="dbs-count"></span></h2>
+      <table><thead><tr><th>Database</th><th>Engine</th><th class="right">Tables</th></tr></thead>
+      <tbody id="dbs"></tbody></table>
+      <div class="empty" id="dbs-empty" hidden>None ingested yet.</div>
+    </div>
+  </div>
+</main>
+
+<footer>graphforge · passwords are never displayed · data refreshes on demand</footer>
+
+<script id="app-script">
+const ICONS = {
+  nodes: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="M12 7v4l-5 6M12 11l5 6"/></svg>',
+  labels: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4L13.4 20.6a2 2 0 0 1-2.8 0l-7.2-7.2a2 2 0 0 1 0-2.8l7.2-7.2a2 2 0 0 1 2.8 0l7.2 7.2a2 2 0 0 1 0 2.8Z"/><path d="M7 17l-2-2"/></svg>',
+  rels: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 7.5l7.6 9M8 6h6M18 18h-6"/></svg>',
+  repos: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4a2 2 0 0 1 2-2h8l6 6v12a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M12 2v6h6"/></svg>'
+};
+function esc(s){ return String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function kv(el, obj){ el.innerHTML = Object.entries(obj).map(
+  ([k,v])=>`<div>${esc(k)}</div><div><code>${esc(v)}</code></div>`).join(''); }
+function badge(status){
+  const s = String(status||'').toLowerCase();
+  let cls = 'muted', txt = status || '—';
+  if (['ok','loaded','done','success','synced','complete'].includes(s)) cls = 'ok';
+  else if (['failed','error','offline'].includes(s)) cls = 'bad';
+  else if (['pending','running','partial','in-progress'].includes(s)) cls = 'warn';
+  return `<span class="badge ${cls}"><span class="dot"></span>${esc(txt)}</span>`;
+}
+let timer = null;
+function setAuto(on){
+  if (timer){ clearInterval(timer); timer = null; }
+  if (on) timer = setInterval(load, 10000);
+}
+document.getElementById('auto').addEventListener('change', e => setAuto(e.target.checked));
+
+async function load(){
+  const conn = document.getElementById('conn');
+  const banner = document.getElementById('banner');
+  conn.className = 'pill warn'; conn.innerHTML = '<span class="dot"></span>loading…';
+  try {
+    const r = await fetch('/api/status'); const d = await r.json();
+    const c = d.config || {};
+    kv(document.getElementById('neo4j-cfg'), c.neo4j || {});
+    kv(document.getElementById('db-cfg'), c.database || {});
+
+    const ok = d.neo4j && d.neo4j.connected;
+    conn.textContent = ok ? 'Neo4j connected' : 'Neo4j offline';
+    conn.className = 'pill ' + (ok ? 'ok' : 'bad');
+    conn.innerHTML = `<span class="dot"></span>${esc(ok ? 'Neo4j connected' : 'Neo4j offline')}`;
+
+    if (d.neo4j && d.neo4j.error) {
+      banner.innerHTML = `<div class="banner">Could not query Neo4j: ${esc(d.neo4j.error)}. Showing configuration only.</div>`;
+    } else if (ok) {
+      banner.innerHTML = `<div class="banner ok">Live graph data — last refreshed ${new Date().toLocaleTimeString()}.</div>`;
+    } else {
+      banner.innerHTML = '';
+    }
+
+    const t = d.totals || {nodes:0,labels:0,relationshipTypes:0};
+    const tiles = [
+      ['Nodes', t.nodes, 'nodes'],
+      ['Labels', t.labels, 'labels'],
+      ['Rel types', t.relationshipTypes, 'rels'],
+      ['Repos', (d.repositories||[]).length, 'repos']
+    ];
+    document.getElementById('tiles').innerHTML = tiles.map(
+      ([l,n,ic])=>`<div class="tile"><div class="top">${ICONS[ic]}${esc(l)}</div>
+        <div class="n">${esc(n)}</div><div class="l">${esc(l)}</div></div>`).join('');
+
+    const labels = d.labels || {};
+    const entries = Object.entries(labels).sort((a,b)=>b[1]-a[1]);
+    const max = entries.length ? entries[0][1] : 1;
+    document.getElementById('labels-count').textContent = entries.length ? `${entries.length} labels` : '';
+    document.getElementById('labels').innerHTML = entries.length
+      ? entries.map(([k,v])=>`<span class="chip">${esc(k)}<span class="bar"><i style="width:${Math.max(8,Math.round(v/max*100))}%"></i></span><b>${esc(v)}</b></span>`).join('')
+      : '<div class="empty">No nodes yet — run an ingest.</div>';
+
+    const repos = d.repositories || [];
+    document.getElementById('repos-count').textContent = repos.length ? `${repos.length}` : '';
+    document.getElementById('repos').innerHTML = repos.map(r=>
+      `<tr><td>${esc(r.name)}</td><td>${badge(r.status)}</td>
+       <td class="num">${esc(r.files??'—')}</td><td class="num">${esc(r.commits??'—')}</td></tr>`).join('');
+    document.getElementById('repos-empty').hidden = repos.length>0;
+
+    const dbs = d.databases || [];
+    document.getElementById('dbs-count').textContent = dbs.length ? `${dbs.length}` : '';
+    document.getElementById('dbs').innerHTML = dbs.map(x=>
+      `<tr><td>${esc(x.name)}</td><td><span class="badge muted">${esc(x.engine||'—')}</span></td>
+       <td class="num">${esc(x.tables??'—')}</td></tr>`).join('');
+    document.getElementById('dbs-empty').hidden = dbs.length>0;
+  } catch (e) {
+    conn.innerHTML = '<span class="dot"></span>dashboard error'; conn.className = 'pill bad';
+    banner.innerHTML = `<div class="banner">${esc(e)}</div>`;
+  }
+}
+load();
+</script>
+</body>
+</html>

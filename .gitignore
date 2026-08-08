@@ -1,0 +1,37 @@
+# ---- graphforge ----
+# Secrets & local config (NEVER commit)
+.env
+*.env
+!.env.example
+config/repositories.json
+config/databases.json
+config/connection.json
+
+# Local data
+/repos/
+/output/
+/cache/
+*.cypher.out
+*.scan.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
