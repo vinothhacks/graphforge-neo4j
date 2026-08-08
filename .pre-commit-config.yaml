@@ -1,0 +1,52 @@
+# Local pre-commit hooks.
+#
+#   pip install -e ".[dev]"
+#   pre-commit install                 # run on every `git commit`
+#   pre-commit run --all-files         # one-off sweep over the whole tree
+#   pre-commit autoupdate              # bump the pinned revs below
+#
+# `rev`s are pinned to released tags rather than floating, so a hook release can
+# never silently change what a commit is checked against. They were pinned
+# offline, so run `pre-commit autoupdate` on the first machine that has network
+# access and commit the result.
+#
+# WARNING for the first run: `ruff-format` has never been executed against this
+# tree. `pre-commit run --all-files` will therefore reformat a large number of
+# files the first time. Do that as a single, isolated, review-only commit --
+# never mixed into a feature change.
+
+exclude: |
+  (?x)^(
+      repos/.*
+    | output/.*
+    | .*\.egg-info/.*
+  )$
+
+default_language_version:
+  python: python3
+
+repos:
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.8.6
+    hooks:
+      # Lint. --fix applies the safe autofixes (import sorting, comprehension
+      # rewrites, ...); --exit-non-zero-on-fix stops the commit so the changes
+      # get staged and reviewed rather than silently applied.
+      - id: ruff
+        args: [--fix, --exit-non-zero-on-fix]
+      # Format. Reads line-length / target-version from pyproject.toml.
+      - id: ruff-format
+
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: end-of-file-fixer
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: check-yaml
+      - id: check-toml
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: detect-private-key
+      - id: check-merge-conflict
+      - id: check-executables-have-shebangs

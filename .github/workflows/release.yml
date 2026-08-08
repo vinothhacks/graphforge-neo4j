@@ -1,42 +1,130 @@
 name: Release
 
-# Publishes graphforge-neo4j to PyPI when you push a version tag (e.g. v0.1.0).
-# Uses PyPI Trusted Publishing (OIDC) — no API token is stored in the repo.
+# Publishes graphforge-neo4j when a version tag is pushed.
 #
-# One-time setup on PyPI: create the project's "trusted publisher" pointing at
+#   v0.2.0        -> PyPI      (environment: pypi)
+#   v0.2.0-rc1    -> TestPyPI  (environment: testpypi)
+#
+# Both use PyPI Trusted Publishing (OIDC). No API token is stored in this repo:
+# the only thing that grants publish rights is `permissions: id-token: write`
+# plus a matching trusted-publisher entry on the index.
+#
+# One-time setup, on BOTH https://pypi.org and https://test.pypi.org
+# (https://docs.pypi.org/trusted-publishers/):
 #   owner: vinothhacks   repo: graphforge-neo4j
-#   workflow: release.yml   environment: pypi
-# (https://docs.pypi.org/trusted-publishers/)
+#   workflow: release.yml
+#   environment: pypi      (on pypi.org)
+#   environment: testpypi  (on test.pypi.org)
+# Create the two GitHub environments with the same names. Adding required
+# reviewers to `pypi` is a cheap way to make production publishes deliberate.
 
 on:
   push:
     tags: ["v*"]
 
+permissions:
+  contents: read
+
 jobs:
+  # ---------------------------------------------------------------------------
   build:
+    name: build
     runs-on: ubuntu-latest
+    timeout-minutes: 15
+    outputs:
+      prerelease: ${{ steps.classify.outputs.prerelease }}
+      version: ${{ steps.classify.outputs.version }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0        # the changelog extractor reads the worktree, but
+                                # full history keeps `git describe` usable too
+
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+
+      # v1.2.3      -> prerelease=false
+      # v1.2.3-rc1  -> prerelease=true
+      - name: Classify the tag
+        id: classify
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          case "$TAG" in
+            v*-rc*|v*rc[0-9]*|v*-alpha*|v*-beta*)
+              PRERELEASE=true ;;
+            v*)
+              PRERELEASE=false ;;
+            *)
+              echo "::error::tag '$TAG' does not start with 'v'; refusing to publish"
+              exit 1 ;;
+          esac
+          echo "tag=$TAG"                     >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}"             >> "$GITHUB_OUTPUT"
+          echo "prerelease=$PRERELEASE"       >> "$GITHUB_OUTPUT"
+          echo "::notice::$TAG -> $([ "$PRERELEASE" = true ] && echo TestPyPI || echo PyPI)"
+
       - name: Build sdist + wheel
         run: |
           python -m pip install --upgrade build
           python -m build
+
       - name: Check metadata
         run: |
           python -m pip install --upgrade twine
-          python -m twine check dist/*
+          python -m twine check --strict dist/*
+
+      # Advisory only. An RC tag (v0.2.0-rc1) legitimately differs from the
+      # PEP 440 version in pyproject.toml (0.2.0rc1), and the index itself is
+      # the real authority on version collisions - so this warns, never fails.
+      - name: Compare tag against built version
+        # The tag arrives through `env:`, never through `${{ }}` inside the
+        # script body, so a crafted tag name cannot become shell code.
+        env:
+          TAGGED: ${{ steps.classify.outputs.version }}
+        run: |
+          set -euo pipefail
+          BUILT="$(python -c "import glob, os; print(os.path.basename(sorted(glob.glob('dist/*.whl'))[0]).split('-')[1])")"
+          echo "tag=$TAGGED built=$BUILT"
+          if [ "${BUILT//-/}" != "${TAGGED//-/}" ]; then
+            echo "::warning::tag $TAGGED and built version $BUILT differ - check [project].version in pyproject.toml"
+          fi
+
+      - name: Extract the CHANGELOG section for this tag
+        run: |
+          python scripts/changelog_section.py "${GITHUB_REF_NAME}" > release-notes.md
+          echo "--- release notes ---"
+          cat release-notes.md
+
       - uses: actions/upload-artifact@v4
         with:
           name: dist
           path: dist/
+          if-no-files-found: error
 
-  publish:
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-notes
+          path: release-notes.md
+          if-no-files-found: error
+
+  # ---------------------------------------------------------------------------
+  # Release candidates -> TestPyPI. Install one with:
+  #   pip install --index-url https://test.pypi.org/simple/ \
+  #               --extra-index-url https://pypi.org/simple/ graphforge-neo4j
+  # (the extra index is needed because the runtime dependencies only live on
+  # the real PyPI).
+  # ---------------------------------------------------------------------------
+  publish-testpypi:
+    name: publish to TestPyPI
     needs: build
+    if: needs.build.outputs.prerelease == 'true'
     runs-on: ubuntu-latest
-    environment: pypi
+    timeout-minutes: 15
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/p/graphforge-neo4j
     permissions:
       id-token: write        # required for Trusted Publishing
     steps:
@@ -45,3 +133,61 @@ jobs:
           name: dist
           path: dist/
       - uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          repository-url: https://test.pypi.org/legacy/
+          # Re-cutting the same RC after a workflow fix is routine; do not fail
+          # the run just because that file is already on the test index.
+          skip-existing: true
+
+  # ---------------------------------------------------------------------------
+  publish-pypi:
+    name: publish to PyPI
+    needs: build
+    if: needs.build.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: pypi
+      url: https://pypi.org/p/graphforge-neo4j
+    permissions:
+      id-token: write        # required for Trusted Publishing
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: pypa/gh-action-pypi-publish@release/v1
+
+  # ---------------------------------------------------------------------------
+  # One GitHub Release for either path, with the CHANGELOG section as its body
+  # and the built artifacts attached. `if: always() && ...` is required because
+  # exactly one of the two publish jobs is always skipped, and a skipped
+  # dependency would otherwise skip this job too.
+  # ---------------------------------------------------------------------------
+  github-release:
+    name: github release
+    needs: [build, publish-pypi, publish-testpypi]
+    if: >-
+      always()
+      && needs.build.result == 'success'
+      && !contains(needs.*.result, 'failure')
+      && !contains(needs.*.result, 'cancelled')
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write        # required to create the release
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-notes
+      - uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: release-notes.md
+          prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
+          files: dist/*
+          fail_on_unmatched_files: true
