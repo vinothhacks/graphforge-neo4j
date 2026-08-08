@@ -7,8 +7,13 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
+- Nothing yet.
 
-**Packaging & sources** *(carried forward — still unreleased)*
+## [0.2.0] — 2026-08-08
+
+### Added
+
+**Packaging & sources** *(carried forward — now released)*
 
 - Published to PyPI as **`graphforge-neo4j`** (`pip install graphforge-neo4j`).
 - Database **connection-URL** input: `graphforge db --url postgresql://user:pass@host:5432/dbname`
