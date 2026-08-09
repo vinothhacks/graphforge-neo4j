@@ -88,6 +88,7 @@ class Neo4jWriter:
         """Run each statement in a schema block (constraints / indexes)."""
         statements = [s.strip() for s in _split_statements(cypher_text) if s.strip()]
         if self.emit_path:
+            assert self._emit_fh is not None
             for stmt in statements:
                 self._emit_fh.write(stmt + ";\n")
             self._emit_fh.write("\n")
@@ -107,6 +108,7 @@ class Neo4jWriter:
             return 0
 
         if self.emit_path:
+            assert self._emit_fh is not None
             for op in ops:
                 self._emit_fh.write(op.to_script() + "\n")
             self.ops_written += len(ops)
@@ -136,6 +138,7 @@ class Neo4jWriter:
         if not statements:
             return 0
         if self.emit_path:
+            assert self._emit_fh is not None
             for stmt in statements:
                 self._emit_fh.write(stmt.rstrip(";") + ";\n")
             self._emit_fh.write("\n")

@@ -137,7 +137,7 @@ def parse_body(body: Any) -> dict[str, Any]:
         return {}
     if isinstance(body, dict):
         return body
-    if isinstance(body, (bytes, bytearray)):
+    if isinstance(body, bytes | bytearray):
         body = bytes(body).decode("utf-8", "replace")
     data = json.loads(body)  # JSONDecodeError is a ValueError
     if not isinstance(data, dict):
@@ -149,8 +149,9 @@ def schema_payload(schema: dict[str, Any]) -> dict[str, Any]:
     """Reshape ``GraphQuery.get_schema()`` into the dashboard's schema payload."""
     counts = schema.get("nodeCountsByLabel") or {}
     names = list(schema.get("labels") or counts.keys())
-    labels = [{"name": str(n), "count": _as_int(counts.get(n))} for n in names]
-    labels.sort(key=lambda item: (-item["count"], item["name"]))
+    pairs = [(str(n), _as_int(counts.get(n))) for n in names]
+    pairs.sort(key=lambda p: (-p[1], p[0]))
+    labels = [{"name": n, "count": c} for n, c in pairs]
     rels = sorted(str(r) for r in (schema.get("relationshipTypes") or []))
     return {"labels": labels, "relationshipTypes": rels,
             "totals": {"labels": len(labels), "relationshipTypes": len(rels),

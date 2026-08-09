@@ -37,9 +37,9 @@ def lit(value: Any) -> str:
         return "null"
     if isinstance(value, bool):
         return "true" if value else "false"
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return repr(value)
-    if isinstance(value, (list, tuple)):
+    if isinstance(value, list | tuple):
         return "[" + ", ".join(lit(v) for v in value) + "]"
     if isinstance(value, Mapping):
         inner = ", ".join(f"{k}: {lit(v)}" for k, v in value.items())
@@ -66,7 +66,11 @@ class Operation:
         # while replacing `$p_identifier`.
         for name in sorted(self.params, key=len, reverse=True):
             pattern = re.compile(r"\$" + re.escape(name) + r"(?![A-Za-z0-9_])")
-            statement = pattern.sub(lambda _m, v=self.params[name]: lit(v), statement)
+
+            def _repl(_m: re.Match[str], value: object = self.params[name]) -> str:
+                return lit(value)
+
+            statement = pattern.sub(_repl, statement)
         prefix = f"// {self.comment}\n" if self.comment else ""
         return f"{prefix}{statement};"
 

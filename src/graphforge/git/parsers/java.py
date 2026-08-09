@@ -74,7 +74,7 @@ def extract(lines: list[str]) -> dict[str, Any]:
                 am = _ANNOTATION.match(line)
                 if not am:
                     break
-                pending.append({"name": am.group(1), "args": (am.group("args") or "").strip(), "line": i})
+                pending.append({"name": am.group(1), "args": (am.group("args") or "").strip(), "line": str(i)})
                 result["annotations"].append({"name": am.group(1), "line": i})
                 line = line[am.end():].strip()
             if not line:

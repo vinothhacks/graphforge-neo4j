@@ -126,12 +126,11 @@ def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
             if decl is not None:
                 body = decl
                 continue
-            if _TYPE_ALIAS.match(line) and (in_types or line.startswith("type ")):
-                am = _TYPE_ALIAS.match(line)
-                if am.group("name") not in _KEYWORDS:
-                    info = _type_info(am.group("name"), "type", i)
-                    info["extends"] = am.group("under")
-                    result["classes"].append(info)
+            am = _TYPE_ALIAS.match(line)
+            if am is not None and (in_types or line.startswith("type ")) and am.group("name") not in _KEYWORDS:
+                info = _type_info(am.group("name"), "type", i)
+                info["extends"] = am.group("under")
+                result["classes"].append(info)
             continue
 
         mm = _METHOD.match(line)
