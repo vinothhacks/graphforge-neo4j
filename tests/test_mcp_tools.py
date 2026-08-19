@@ -276,6 +276,83 @@ def test_pagination_is_additive_so_old_calls_are_unchanged():
     assert graph.driver.executed[0][1] == {"value": "Foo", "limit": 25, "offset": 0}
 
 
+# =========================================================== search_codebase ==
+def test_search_codebase_uses_tolower_and_defaults_to_code():
+    driver = _page_driver([{"name": "Foo", "ref": "a.Foo", "repo": "svc"}], total=1)
+    page = GraphQuery(driver, "neo4j").search_codebase("FOO")
+    cypher, params = driver.executed[0]
+    assert "toLower" in cypher and "toLower($t)" in cypher
+    assert "n:File OR n:Class OR n:Method" in cypher
+    assert "n:Table OR n:Column OR n:StoredProcedure" not in cypher
+    assert params["t"] == "FOO" and params["limit"] == 25 and params["offset"] == 0
+    assert page["total"] == 1 and page["hasMore"] is False
+    assert sorted(page) == ["hasMore", "limit", "offset", "rows", "total"]
+
+
+def test_search_codebase_kind_schema_matches_tables_columns_and_procedures():
+    driver = _page_driver([{"name": "booking", "database": "shop"}], total=3)
+    page = GraphQuery(driver, "neo4j").search_codebase("Book", kind="schema")
+    cypher, params = driver.executed[0]
+    assert "toLower" in cypher
+    assert "n:Table OR n:Column OR n:StoredProcedure" in cypher
+    assert "n:File OR n:Class OR n:Method" not in cypher
+    assert params["t"] == "Book"
+    assert page["rows"][0]["database"] == "shop"
+
+
+def test_search_codebase_kind_all_covers_code_and_schema():
+    driver = FakeDriver()
+    GraphQuery(driver, "neo4j").search_codebase("x", kind="ALL")
+    cypher = driver.executed[0][0]
+    assert "n:File OR n:Class OR n:Method" in cypher
+    assert "n:Table OR n:Column OR n:StoredProcedure" in cypher
+    assert "toLower($t)" in cypher
+
+
+def test_search_codebase_honours_repo_limit_and_offset():
+    driver = _page_driver([{"name": "a"}], total=9)
+    page = GraphQuery(driver, "neo4j").search_codebase(
+        "a", kind="code", repo="svc", limit=1, offset=2)
+    cypher, params = driver.executed[0]
+    assert "n.repo = $repo" in cypher
+    assert params == {"t": "a", "limit": 1, "offset": 2, "repo": "svc"}
+    count_cypher, count_params = driver.one("count(n) AS total")
+    assert "n.repo = $repo" in count_cypher
+    assert count_params == {"t": "a", "repo": "svc"}
+    assert page == {"rows": [{"name": "a"}], "total": 9, "limit": 1,
+                    "offset": 2, "hasMore": True}
+
+
+def test_search_codebase_omits_repo_param_when_blank():
+    driver = FakeDriver()
+    GraphQuery(driver, "neo4j").search_codebase("x", repo="  ")
+    cypher, params = driver.executed[0]
+    assert "AND n.repo = $repo" not in cypher
+    assert "repo" not in params
+
+
+def test_search_codebase_rejects_unknown_kind():
+    with pytest.raises(ValueError, match="kind"):
+        GraphQuery(FakeDriver(), "neo4j").search_codebase("x", kind="files")
+
+
+def test_find_code_where_is_case_insensitive():
+    driver = FakeDriver()
+    rows = GraphQuery(driver, "neo4j").find_code("Foo")
+    assert type(rows) is list
+    cypher, params = driver.executed[0]
+    assert "toLower" in cypher and "toLower($t)" in cypher
+    assert "toString(n.name) CONTAINS $t" not in cypher
+    assert params["t"] == "Foo"
+
+
+def test_search_codebase_page_matches_find_code_page():
+    driver = _page_driver([{"name": "orders"}], total=4)
+    page = GraphQuery(driver, "neo4j").search_codebase("ord", limit=1, offset=2)
+    assert page == {"rows": [{"name": "orders"}], "total": 4, "limit": 1,
+                    "offset": 2, "hasMore": True}
+
+
 # =============================================================== schema cache ==
 def _schema_driver(count=1):
     return FakeDriver(script=[
@@ -707,8 +784,8 @@ def _build_server_with_fakes(driver):
 def test_build_server_registers_every_documented_tool():
     server = _build_server_with_fakes(FakeDriver())
     expected = {"get_schema", "read_cypher", "search_nodes", "node_neighbors", "find_code",
-                "find_table", "find_procedure", "impact_of_column", "explain_impact",
-                "find_dead_code", "blast_radius_of_file"}
+                "search_codebase", "find_table", "find_procedure", "impact_of_column",
+                "explain_impact", "find_dead_code", "blast_radius_of_file"}
     assert set(server.tools) == expected
     assert server.name == "graphforge"
     for name, fn in server.tools.items():
@@ -717,7 +794,7 @@ def test_build_server_registers_every_documented_tool():
 
 def test_module_docstring_lists_the_new_tools():
     doc = mcp.__doc__ or ""
-    for name in ("explain_impact", "find_dead_code", "blast_radius_of_file"):
+    for name in ("explain_impact", "find_dead_code", "blast_radius_of_file", "search_codebase"):
         assert f"``{name}``" in doc, name
     assert "offset" in doc and "hasMore" in doc
 
@@ -727,7 +804,8 @@ def test_paged_tools_answer_with_rows_total_and_hasmore():
     server = _build_server_with_fakes(driver)
     for tool, args in (("search_nodes", ("Table", "name", "ord", 1, 0)),
                        ("find_code", ("ord", 1, 0)),
-                       ("find_table", ("ord", 1, 0))):
+                       ("find_table", ("ord", 1, 0)),
+                       ("search_codebase", ("ord", "code", "", 1, 0))):
         payload = json.loads(server.tools[tool](*args))
         assert payload["total"] == 9 and payload["hasMore"] is True, tool
         assert payload["limit"] == 1 and payload["offset"] == 0, tool

@@ -4,6 +4,7 @@
     graphforge git  [...]      # ingest git repositories (structure + history)
     graphforge db   [...]      # ingest relational database schemas
     graphforge mcp             # serve the graph over MCP
+    graphforge search QUERY    # search code / schema nodes in the graph
     graphforge verify          # connect and report node counts per label
 """
 from __future__ import annotations
@@ -282,6 +283,42 @@ def cmd_mcp(args) -> int:
     return 0
 
 
+def cmd_search(args) -> int:
+    query = (args.query or "").strip()
+    if not query:
+        print("error: empty query", file=sys.stderr)
+        return 2
+    from .mcp.server import GraphQuery
+
+    s = _settings(args)
+    gq = GraphQuery.connect(s.neo4j)
+    try:
+        page = gq.search_codebase(
+            query, kind=args.kind, repo=args.repo or "", limit=args.limit)
+    finally:
+        gq.close()
+    rows = page["rows"]
+    if not rows:
+        print("[graphforge] no matches")
+        return 0
+    if args.kind == "schema":
+        print(f"{'labels':24s} {'name':32s} {'database':20s} table")
+        for row in rows:
+            labels = ",".join(row.get("labels") or [])
+            print(f"{labels:24s} {(row.get('name') or ''):32s} "
+                  f"{(row.get('database') or ''):20s} {row.get('table') or ''}")
+    else:
+        print(f"{'labels':24s} {'name':32s} {'ref':44s} repo")
+        for row in rows:
+            labels = ",".join(row.get("labels") or [])
+            ref = row.get("ref") or row.get("database") or ""
+            print(f"{labels:24s} {(row.get('name') or ''):32s} "
+                  f"{ref:44s} {row.get('repo') or ''}")
+    more = f", {page['total']} total — pass a higher --limit" if page.get("hasMore") else ""
+    print(f"[graphforge] {len(rows)} match(es){more}")
+    return 0
+
+
 # ----------------------------------------------------------------------------
 def build_parser() -> argparse.ArgumentParser:
     from .link import passes as link_passes  # for the --min-table-name-len default
@@ -378,6 +415,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_mcp = sub.add_parser("mcp", help="serve the knowledge graph over MCP (stdio)")
     _add_common(p_mcp)
     p_mcp.set_defaults(func=cmd_mcp)
+
+    p_search = sub.add_parser("search", help="search code and/or schema nodes in the graph")
+    p_search.add_argument("query", nargs="?", default="",
+                          help="substring to match (case-insensitive)")
+    p_search.add_argument("--kind", choices=["code", "schema", "all"], default="code",
+                          help="code = File/Class/Method (default); schema = Table/Column/StoredProcedure")
+    p_search.add_argument("--repo", default="", metavar="NAME",
+                          help="limit hits to one repository name")
+    p_search.add_argument("--limit", type=int, default=25)
+    _add_common(p_search)
+    p_search.set_defaults(func=cmd_search)
 
     return parser
 

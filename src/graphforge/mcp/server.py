@@ -8,7 +8,8 @@ the graph with these tools:
 * ``read_cypher``            — run a read-only Cypher query (writes are rejected)
 * ``search_nodes``           — substring search on a property of a given label (paged)
 * ``node_neighbors``         — the immediate neighbourhood of a node id
-* ``find_code``              — locate files / classes / methods by name (paged)
+* ``find_code``              — locate files / classes / methods by name (paged, case-insensitive)
+* ``search_codebase``        — unified code / schema search (paged, case-insensitive)
 * ``find_table``             — locate tables / columns by name (paged)
 * ``find_procedure``         — locate stored procedures by name or body
 * ``impact_of_column``       — raw blast radius of a column name
@@ -17,8 +18,9 @@ the graph with these tools:
 * ``find_dead_code``         — stale + unreferenced file/class *candidates* in a repo
 * ``blast_radius_of_file``   — classes a file declares, their methods, and callers
 
-The paged tools (``search_nodes`` / ``find_code`` / ``find_table``) accept
-``limit`` and ``offset`` and answer ``{rows, total, hasMore, limit, offset}``.
+The paged tools (``search_nodes`` / ``find_code`` / ``find_table`` /
+``search_codebase``) accept ``limit`` and ``offset`` and answer
+``{rows, total, hasMore, limit, offset}``.
 
 The graph-query logic lives in :class:`GraphQuery` (driver in, dicts out) so it
 can be unit-tested without the MCP runtime. The ``mcp`` package is imported
@@ -31,7 +33,7 @@ import re
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, ClassVar
 
 from ..core.config import Neo4jSettings, load_settings
 
@@ -241,26 +243,80 @@ class GraphQuery:
         )
         return self._read(cypher, {"id": node_id, "limit": int(limit)})
 
-    _FIND_CODE_WHERE = (
-        "MATCH (n) WHERE (n:File OR n:Class OR n:Method) AND "
-        "(toString(n.name) CONTAINS $t OR toString(n.fqn) CONTAINS $t OR toString(n.path) CONTAINS $t) "
+    # Case-insensitive substring match on the properties a human would type.
+    _CODE_PRED = (
+        "(n:File OR n:Class OR n:Method) AND "
+        "(toLower(toString(coalesce(n.name, ''))) CONTAINS toLower($t) OR "
+        "toLower(toString(coalesce(n.fqn, ''))) CONTAINS toLower($t) OR "
+        "toLower(toString(coalesce(n.path, ''))) CONTAINS toLower($t))"
     )
+    _SCHEMA_PRED = (
+        "(n:Table OR n:Column OR n:StoredProcedure) AND "
+        "(toLower(toString(coalesce(n.name, ''))) CONTAINS toLower($t) OR "
+        "toLower(toString(coalesce(n.definition, ''))) CONTAINS toLower($t))"
+    )
+    _FIND_CODE_WHERE = "MATCH (n) WHERE " + _CODE_PRED + " "
+    _FIND_SCHEMA_WHERE = "MATCH (n) WHERE " + _SCHEMA_PRED + " "
+    _SEARCH_KINDS = frozenset({"code", "schema", "all"})
+    _SEARCH_RETURN: ClassVar[dict[str, str]] = {
+        "code": (
+            "RETURN labels(n) AS labels, n.name AS name, "
+            "coalesce(n.fqn, n.path) AS ref, n.repo AS repo "
+        ),
+        "schema": (
+            "RETURN labels(n) AS labels, n.name AS name, "
+            "n.database AS database, n.table AS table "
+        ),
+        "all": (
+            "RETURN labels(n) AS labels, n.name AS name, "
+            "coalesce(n.fqn, n.path) AS ref, n.repo AS repo, "
+            "n.database AS database, n.table AS table "
+        ),
+    }
+
+    def _search_where(self, kind: str, repo: str) -> str:
+        if kind == "schema":
+            where = self._FIND_SCHEMA_WHERE
+        elif kind == "all":
+            where = f"MATCH (n) WHERE (({self._CODE_PRED}) OR ({self._SCHEMA_PRED})) "
+        else:
+            where = self._FIND_CODE_WHERE
+        if repo:
+            where += "AND n.repo = $repo "
+        return where
+
+    def search_codebase(self, text: str, kind: str = "code", repo: str = "",
+                        limit: int = 25, offset: int = 0) -> dict:
+        """Case-insensitive codebase / schema search, paged.
+
+        ``kind`` is ``code`` (File / Class / Method), ``schema`` (Table / Column /
+        StoredProcedure), or ``all``. Optional ``repo`` filters ``n.repo``.
+        """
+        kind = (kind or "code").strip().lower()
+        if kind not in self._SEARCH_KINDS:
+            allowed = ", ".join(sorted(self._SEARCH_KINDS))
+            raise ValueError(f"kind must be one of {allowed}, not {kind!r}")
+        repo = (repo or "").strip()
+        limit, offset = _clamp_limit(limit), _clamp_offset(offset)
+        where = self._search_where(kind, repo)
+        params: dict[str, Any] = {"t": text, "limit": limit, "offset": offset}
+        if repo:
+            params["repo"] = repo
+        rows = self._read(
+            where + self._SEARCH_RETURN[kind] + "SKIP $offset LIMIT $limit", params)
+        count_params: dict[str, Any] = {"t": text}
+        if repo:
+            count_params["repo"] = repo
+        total = self._count(where + "RETURN count(n) AS total", count_params)
+        return _page(rows, total, limit, offset)
 
     def find_code(self, text: str, limit: int = 25, offset: int = 0) -> list[dict]:
-        cypher = (
-            self._FIND_CODE_WHERE +
-            "RETURN labels(n) AS labels, n.name AS name, coalesce(n.fqn, n.path) AS ref, n.repo AS repo "
-            "SKIP $offset LIMIT $limit"
-        )
-        return self._read(cypher, {"t": text, "limit": _clamp_limit(limit),
-                                   "offset": _clamp_offset(offset)})
+        """Locate File / Class / Method nodes. Thin wrapper over :meth:`search_codebase`."""
+        return self.search_codebase(text, kind="code", limit=limit, offset=offset)["rows"]
 
     def find_code_page(self, text: str, limit: int = 25, offset: int = 0) -> dict:
         """:meth:`find_code` plus ``total`` / ``hasMore``."""
-        limit, offset = _clamp_limit(limit), _clamp_offset(offset)
-        rows = self.find_code(text, limit, offset)
-        total = self._count(self._FIND_CODE_WHERE + "RETURN count(n) AS total", {"t": text})
-        return _page(rows, total, limit, offset)
+        return self.search_codebase(text, kind="code", limit=limit, offset=offset)
 
     _FIND_TABLE_WHERE = "MATCH (n) WHERE (n:Table OR n:Column) AND toString(n.name) CONTAINS $t "
 
@@ -636,9 +692,21 @@ def build_server(settings: Neo4jSettings | None = None):
     def find_code(text: str, limit: int = 25, offset: int = 0) -> str:
         """Find File / Class / Method nodes whose name, fqn, or path contains `text`.
 
-        Paged: returns {rows, total, hasMore, limit, offset}.
+        Case-insensitive. Paged: returns {rows, total, hasMore, limit, offset}.
         """
         return _json(gq.find_code_page(text, limit, offset))
+
+    @server.tool()
+    def search_codebase(text: str, kind: str = "code", repo: str = "",
+                        limit: int = 25, offset: int = 0) -> str:
+        """Search the graph for code and/or schema nodes matching `text`.
+
+        Case-insensitive. `kind` is 'code' (File / Class / Method; the default),
+        'schema' (Table / Column / StoredProcedure), or 'all'. Optional `repo`
+        limits code hits to one repository name. Paged: returns
+        {rows, total, hasMore, limit, offset}.
+        """
+        return _json(gq.search_codebase(text, kind, repo, limit, offset))
 
     @server.tool()
     def find_table(text: str, limit: int = 25, offset: int = 0) -> str:
