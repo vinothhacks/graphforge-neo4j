@@ -8,6 +8,12 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- Layered read-query gate (`graphforge.query_guard`): procedure allowlist, clause
+  denies, limit cap; Neo4j read transactions for anything that still runs.
+- [docs/FEATURE_AUDIT.md](docs/FEATURE_AUDIT.md) — README / BUILD_PLAN / code / tests.
+- pytest markers `e2e_critical` / `e2e_full` and CI jobs (PR Neo4j HTTP/CLI, no
+  Chromium; main/nightly playground). Dashboard browser coverage is the Playwright
+  MCP agent runbook ([docs/DASHBOARD_E2E.md](docs/DASHBOARD_E2E.md)), not CI.
 - `graphforge search QUERY [--kind code|schema|all] [--repo NAME]` — case-insensitive
   codebase / schema search over the graph.
 - MCP tool `search_codebase` (same query as the CLI; paged).

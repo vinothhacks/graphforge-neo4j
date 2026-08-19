@@ -33,7 +33,7 @@ class _Tx:
     def __init__(self, driver):
         self.driver = driver
 
-    def run(self, cypher, params=None):
+    def run(self, cypher, params=None, **_kwargs):
         self.driver.executed.append((cypher, dict(params or {})))
         return [_Rec(row) for row in self.driver.rows_for(cypher)]
 
@@ -48,7 +48,7 @@ class _Session:
     def __exit__(self, *_a):
         return False
 
-    def execute_read(self, fn):
+    def execute_read(self, fn, *args, **kwargs):
         return fn(_Tx(self.driver))
 
 

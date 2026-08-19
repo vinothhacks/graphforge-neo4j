@@ -134,7 +134,7 @@ graphforge git /path/to/repo --dry-run            # just count the operations
 | `graphforge init` | Create the graph's constraints and indexes. |
 | `graphforge git [PATHS/URLS…]` | Ingest repositories: code structure + commit history. |
 | `graphforge db` | Ingest relational schemas (MySQL / PostgreSQL / SQL Server). |
-| `graphforge vds` | Optional: import a virtual-data-service / query catalog (see below). |
+| `graphforge vds` | Optional: import a VDS / query-service catalog (`vdsservicecatalog`, `querydetails`, `wherefieldconfig`) into `VDSService` / `VDSQuery` / `VDSWhereField` nodes. Flags: `--engine/--host/--port/--user/--password/--database/--driver` plus `--emit` / `--dry-run` / `--no-schema`. |
 | `graphforge link` | Create code↔database edges over the loaded graph. |
 | `graphforge status` | Show per-repository ingest status. |
 | `graphforge verify` | Report node counts per label. |
@@ -142,7 +142,7 @@ graphforge git /path/to/repo --dry-run            # just count the operations
 | `graphforge ui` | Serve the local web dashboard (graph canvas, Cypher console, masked config + live load status). |
 | `graphforge mcp` | Serve the graph over MCP (stdio). |
 
-Flags shared by the ingest commands: `--emit FILE`, `--dry-run`, `--no-schema`, `--replace`, and Neo4j overrides `--neo4j-uri/-user/-password/-database`, plus `--env FILE` to load a specific `.env`. Run any command with `--help` for its full list.
+Flags shared by the ingest commands (`init`, `git`, `db`, `vds`, `link`): `--emit FILE`, `--dry-run`, `--no-schema`, and Neo4j overrides `--neo4j-uri/-user/-password/-database`, plus `--env FILE` to load a specific `.env`. `--replace` is `git` and `db` only. Run any command with `--help` for its full list.
 
 **`graphforge git`**
 
@@ -336,7 +336,7 @@ Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.jso
 | Tool | Arguments | Purpose |
 |------|-----------|---------|
 | `get_schema` | `ttl`, `refresh` | Labels, relationship types, node counts per label. Cached for 60s by default; `refresh=true` forces a fresh read, `ttl=0` bypasses the cache. |
-| `read_cypher` | `query`, `limit` | Run a **read-only** Cypher query. Writes are rejected. |
+| `read_cypher` | `query`, `limit` | Run a **read-only** Cypher query. Writes, `LOAD CSV`, `USE`, `SHOW`, multi-statement, and unknown procedures are rejected. Allowed procedures: `db.labels`, `db.relationshipTypes`, `db.propertyKeys`. |
 | `search_nodes` | `label`, `prop`, `value`, `limit`, `offset` | Substring search on a property of a label. **Paged.** |
 | `node_neighbors` | `node_id`, `limit` | The immediate neighbourhood of a node `id`. |
 | `search_codebase` | `text`, `kind`, `repo`, `limit`, `offset` | Case-insensitive code and/or schema search. `kind` is `code` / `schema` / `all`. Optional `repo`. **Paged.** |
@@ -374,7 +374,7 @@ Behind it are seven read-only JSON endpoints: `GET /api/status`, `/api/schema`, 
 
 ### Screenshots
 
-There is no dashboard screenshot checked in yet — a real one has to come from a real browser against a real graph, and a placeholder would be worse than nothing. If you have graphforge running, capturing one is a ten-minute contribution: see [`docs/img/README.md`](docs/img/README.md) for the exact recipe (what to load, what to frame, where to save it, and what to check for before publishing a picture of your own configuration). Once `docs/img/dashboard.png` exists, this section gets the image.
+<img src="docs/img/dashboard.png" alt="graphforge dashboard: force-directed graph canvas, node counts by label, and the Cypher console" width="900">
 
 ---
 

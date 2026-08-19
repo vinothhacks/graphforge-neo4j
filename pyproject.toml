@@ -72,6 +72,10 @@ graphforge = ["schema/*.cypher", "ui/*.html", "py.typed"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+markers = [
+    "e2e_critical: live Neo4j, HTTP/CLI only (no browser)",
+    "e2e_full: playground Neo4j + Postgres, CLI + graphforge MCP stdio",
+]
 
 [tool.ruff]
 line-length = 100

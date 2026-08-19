@@ -51,3 +51,12 @@ def test_inline_annotations_on_declaration_line():
     assert c["name"] == "Order"
     assert c["stereotype"] == "Entity"
     assert c["mappedTable"] == "orders"
+
+
+def test_malformed_input_never_raises():
+    for bad in ([], ["class ((((("], ["public void )("], ["@@@@"],
+                ["package ;"], ["'''never closed"], ["\x00 binary"], ["import"]):
+        info = extract(bad)
+        assert isinstance(info["classes"], list)
+        assert set(info) >= {"package", "imports", "classes", "interfaces",
+                             "enums", "methods", "annotations"}

@@ -33,8 +33,9 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from ..core.config import Settings
 from ..mcp.server import _IDENT as _IDENT_RE
-from ..mcp.server import _WRITE as _WRITE_RE
+from ..mcp.server import _WRITE as _WRITE_RE  # noqa: F401 — imported for test identity
 from ..mcp.server import GraphQuery
+from ..query_guard import is_denied as _query_denied
 
 log = logging.getLogger("graphforge.ui")
 
@@ -115,8 +116,8 @@ def is_identifier(name: str) -> bool:
 
 
 def is_write_query(cypher: str) -> bool:
-    """Reuse the MCP write guard so both surfaces reject the same things."""
-    return bool(_WRITE_RE.search(cypher or ""))
+    """Reuse the MCP read-query gate so both surfaces reject the same things."""
+    return _query_denied(cypher or "")
 
 
 def _first(params: dict[str, list[str]], key: str, default: str = "") -> str:

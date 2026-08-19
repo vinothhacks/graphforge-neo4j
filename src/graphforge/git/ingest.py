@@ -159,7 +159,14 @@ class GitIngestor:
             return ""
         sha = self.stored_last_commit(repo) if since_commit == "auto" else since_commit
         if not sha:
-            log.info("no stored lastCommit for '%s'; running a full ingest", repo)
+            if since_commit == "auto" and self.writer.mode != "push":
+                log.info(
+                    "--since-commit auto cannot read :Repository.lastCommit in %s mode "
+                    "(no graph connection); running a full ingest",
+                    self.writer.mode,
+                )
+            else:
+                log.info("no stored lastCommit for '%s'; running a full ingest", repo)
             return ""
         if not history_mod.commit_exists(path, sha):
             log.warning("commit %s not found in '%s'; running a full ingest", sha[:12], repo)

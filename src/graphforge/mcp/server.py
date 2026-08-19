@@ -135,11 +135,18 @@ class GraphQuery:
         self.driver.close()
 
     # -- primitives --------------------------------------------------------
-    def _read(self, cypher: str, params: dict[str, Any] | None = None) -> list[dict]:
+    def _read(self, cypher: str, params: dict[str, Any] | None = None,
+              timeout: float | None = None) -> list[dict]:
+        def _work(tx):
+            result = tx.run(cypher, params or {})
+            return [r.data() for r in result]
+
+        if timeout is not None:
+            from neo4j import unit_of_work
+            _work = unit_of_work(timeout=timeout)(_work)
+
         with self.driver.session(database=self.database) as session:
-            return session.execute_read(
-                lambda tx: [r.data() for r in tx.run(cypher, params or {})]
-            )
+            return session.execute_read(_work)
 
     def _count(self, cypher: str, params: dict[str, Any] | None = None) -> int:
         rows = self._read(cypher, params)
@@ -205,11 +212,20 @@ class GraphQuery:
 
     # -- tools -------------------------------------------------------------
     def read_cypher(self, query: str, params: dict[str, Any] | None = None, limit: int = 200) -> list[dict]:
-        if _WRITE.search(query):
-            raise ValueError("read_cypher only accepts read-only queries (no CREATE/MERGE/DELETE/SET/…).")
-        if " LIMIT " not in query.upper():
+        from ..query_guard import (
+            READ_TX_TIMEOUT_SECONDS,
+            check_read_query,
+            clamp_read_limit,
+        )
+
+        reason = check_read_query(query, limit)
+        if reason:
+            raise ValueError(reason)
+        limit = clamp_read_limit(limit)
+        stripped = query.lstrip().upper()
+        if " LIMIT " not in stripped and not stripped.startswith("CALL"):
             query = query.rstrip("; \n") + f"\nLIMIT {int(limit)}"
-        return self._read(query, params)
+        return self._read(query, params, timeout=READ_TX_TIMEOUT_SECONDS)
 
     def search_nodes(self, label: str, prop: str, value: str, limit: int = 25,
                      offset: int = 0) -> list[dict]:
@@ -671,7 +687,12 @@ def build_server(settings: Neo4jSettings | None = None):
 
     @server.tool()
     def read_cypher(query: str, limit: int = 200) -> str:
-        """Run a READ-ONLY Cypher query against the knowledge graph and return rows as JSON."""
+        """Run a READ-ONLY Cypher query against the knowledge graph and return rows as JSON.
+
+        Writes, LOAD CSV, USE, SHOW, multi-statement queries, and procedures
+        outside the allowlist (db.labels, db.relationshipTypes, db.propertyKeys)
+        are rejected before a transaction is opened.
+        """
         return _json(gq.read_cypher(query, limit=limit))
 
     @server.tool()
