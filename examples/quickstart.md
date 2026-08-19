@@ -98,8 +98,10 @@ graphforge mcp        # serves over stdio
 ```
 
 Then merge [`claude_desktop_config.json`](claude_desktop_config.json) into your
-MCP client config and restart it. Eleven read-only tools appear — see the
-[README](../README.md#query-it-from-an-mcp-client).
+MCP client config (or [`cursor_mcp.json`](cursor_mcp.json) into
+`.cursor/mcp.json`) and restart it. Twelve read-only tools appear — see the
+[README](../README.md#query-it-from-an-mcp-client) and
+[docs/CONNECT.md](../docs/CONNECT.md).
 
 ## Example Cypher, once loaded
 

@@ -19,6 +19,7 @@ By default the git and database subgraphs live side by side but stay separate. O
 
 - [Why a graph](#why-a-graph)
 - [Install](#install)
+- [Connect](docs/CONNECT.md)
 - [Quickstart](#quickstart)
 - [Try it with no database](#try-it-with-no-database)
 - [Commands](#commands)
@@ -105,6 +106,7 @@ graphforge link                                   # MAPS_TO, BASED_ON, USES_TABL
 graphforge ui                                     # web dashboard at http://localhost:8000
 graphforge status                                 # per-repository ingest status
 graphforge verify                                 # node counts by label
+graphforge search booking --kind all              # case-insensitive code / schema search
 
 # ---- Serve to an MCP client ----
 graphforge mcp                                    # stdio MCP server
@@ -136,6 +138,7 @@ graphforge git /path/to/repo --dry-run            # just count the operations
 | `graphforge link` | Create code↔database edges over the loaded graph. |
 | `graphforge status` | Show per-repository ingest status. |
 | `graphforge verify` | Report node counts per label. |
+| `graphforge search QUERY` | Case-insensitive search of File/Class/Method (`--kind code`, the default), Table/Column/StoredProcedure (`schema`), or both (`all`). Optional `--repo NAME`. |
 | `graphforge ui` | Serve the local web dashboard (graph canvas, Cypher console, masked config + live load status). |
 | `graphforge mcp` | Serve the graph over MCP (stdio). |
 
@@ -321,11 +324,14 @@ RETURN t.database AS database, t.name AS table, c.dataType AS dataType,
 
 ## Query it from an MCP client
 
+Step-by-step wiring for Neo4j Browser, SQL Server, Cursor, and search is in
+**[docs/CONNECT.md](docs/CONNECT.md)**. The short version:
+
 ```bash
 graphforge mcp          # starts a read-only stdio MCP server
 ```
 
-Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.json) into your MCP client's config (fill in the Neo4j password) and restart it. **Eleven** tools are exposed, all read-only:
+Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.json) into Claude Desktop (or any `mcpServers` client), or copy [`examples/cursor_mcp.json`](examples/cursor_mcp.json) to `.cursor/mcp.json` (gitignored). Fill in the Neo4j password — the placeholder is `please-change-me`. **Twelve** tools are exposed, all read-only:
 
 | Tool | Arguments | Purpose |
 |------|-----------|---------|
@@ -333,7 +339,8 @@ Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.jso
 | `read_cypher` | `query`, `limit` | Run a **read-only** Cypher query. Writes are rejected. |
 | `search_nodes` | `label`, `prop`, `value`, `limit`, `offset` | Substring search on a property of a label. **Paged.** |
 | `node_neighbors` | `node_id`, `limit` | The immediate neighbourhood of a node `id`. |
-| `find_code` | `text`, `limit`, `offset` | File / Class / Method nodes whose name, fqn or path contains `text`. **Paged.** |
+| `search_codebase` | `text`, `kind`, `repo`, `limit`, `offset` | Case-insensitive code and/or schema search. `kind` is `code` / `schema` / `all`. Optional `repo`. **Paged.** |
+| `find_code` | `text`, `limit`, `offset` | File / Class / Method nodes whose name, fqn or path contains `text` (case-insensitive). **Paged.** |
 | `find_table` | `text`, `limit`, `offset` | Table / Column nodes whose name contains `text`. **Paged.** |
 | `find_procedure` | `text`, `limit` | Stored procedures by name or SQL body. |
 | `impact_of_column` | `column` | Blast radius of a column: matching columns across schemas, FKs, indexes, and procedures/views that reference it. |
@@ -341,7 +348,7 @@ Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.jso
 | `find_dead_code` | `repo`, `days`, `limit` | Files and classes with no commit in `days` days and no in-repo importer. **Candidates only** — the answer carries its own caveat. |
 | `blast_radius_of_file` | `path` | What a change to `path` can reach: the classes it declares, their methods, and the files whose classes import them. |
 
-**Pagination.** `search_nodes`, `find_code` and `find_table` return `{rows, total, limit, offset, hasMore}`. Keep asking with `offset = offset + limit` while `hasMore` is true, instead of blowing the context on one giant result.
+**Pagination.** `search_nodes`, `search_codebase`, `find_code` and `find_table` return `{rows, total, limit, offset, hasMore}`. Keep asking with `offset = offset + limit` while `hasMore` is true, instead of blowing the context on one giant result.
 
 **Caching.** `get_schema` is memoised process-wide per connection for 60 seconds, so an agent that reaches for the schema on every turn does not re-count the whole graph each time.
 

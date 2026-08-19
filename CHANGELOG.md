@@ -7,7 +7,18 @@ All notable changes to this project are documented here. The format is based on
 ## [Unreleased]
 
 ### Added
-- Nothing yet.
+
+- `graphforge search QUERY [--kind code|schema|all] [--repo NAME]` — case-insensitive
+  codebase / schema search over the graph.
+- MCP tool `search_codebase` (same query as the CLI; paged).
+- [docs/CONNECT.md](docs/CONNECT.md) — Neo4j Browser / Bolt, SQL Server catalog vs
+  instance, git ingest, Cursor/Claude MCP wiring, and how to search afterwards.
+- [`examples/cursor_mcp.json`](examples/cursor_mcp.json) — Cursor MCP stub
+  (`please-change-me` only; copy to `.cursor/mcp.json`, which stays gitignored).
+
+### Changed
+
+- MCP `find_code` is case-insensitive (`Foo` finds `foo`).
 
 ## [0.2.0] — 2026-08-08
 

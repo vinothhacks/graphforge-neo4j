@@ -34,5 +34,6 @@ htmlcov/
 # Editors / OS
 .idea/
 .vscode/
+.cursor/mcp.json
 .DS_Store
 Thumbs.db

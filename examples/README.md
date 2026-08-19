@@ -11,6 +11,7 @@ questions" without inventing your own fixtures.
 | [`seed/01-shop-schema.sql`](seed/01-shop-schema.sql) | The schema the playground loads — 5 tables, FKs, indexes, 2 views, 2 functions, a few rows. |
 | [`queries/`](queries/) | The [README recipes](../README.md#recipes) as standalone `.cypher` files. |
 | [`claude_desktop_config.json`](claude_desktop_config.json) | MCP client wiring for Claude Desktop (or any stdio MCP client). |
+| [`cursor_mcp.json`](cursor_mcp.json) | Same wiring shaped for Cursor (copy to `.cursor/mcp.json`, which is gitignored). |
 
 ---
 

@@ -115,7 +115,7 @@ interpolation. See [ADR 6](#adr-6-schema-not-rows).
 
 ### MCP surface
 
-`mcp/server.py` builds a FastMCP server over a `GraphQuery` helper. Eleven
+`mcp/server.py` builds a FastMCP server over a `GraphQuery` helper. Twelve
 tools, all read-only:
 
 | Tool | Notes |
@@ -124,7 +124,8 @@ tools, all read-only:
 | `read_cypher` | write statements rejected |
 | `search_nodes` | paged |
 | `node_neighbors` | |
-| `find_code` | paged |
+| `search_codebase` | paged; `kind` = code / schema / all; case-insensitive |
+| `find_code` | paged; case-insensitive; wraps `search_codebase` |
 | `find_table` | paged |
 | `find_procedure` | |
 | `impact_of_column` | |
