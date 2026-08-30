@@ -677,12 +677,55 @@ def _impact_summary(target: str, kind: str, tables: list[str], counts: dict[str,
             f"need review; they can be false positives.")
 
 
-def build_server(settings: Neo4jSettings | None = None):
-    """Construct a FastMCP server with graph tools bound to a live connection."""
+class LazyGraph:
+    """A :class:`GraphQuery` that connects on first use rather than at startup.
+
+    Connecting eagerly meant an unreachable database killed the server process
+    before it ever spoke MCP, and the client showed only "server exited" with no
+    hint as to why. Deferring it means the client always connects and always
+    lists the tools; an unreachable graph is answered as a readable error to
+    whoever asked. Because a failed attempt leaves the connection unset, simply
+    starting Neo4j is enough -- no client restart.
+    """
+
+    def __init__(self, settings: Neo4jSettings):
+        self._settings = settings
+        self._graph: GraphQuery | None = None
+
+    def connect(self) -> GraphQuery:
+        if self._graph is None:
+            from ..core.errors import neo4j_advice
+            try:
+                self._graph = GraphQuery.connect(self._settings)
+            except Exception as exc:
+                advice = neo4j_advice(exc, self._settings)
+                if advice is None:
+                    raise
+                raise RuntimeError(advice) from exc
+        return self._graph
+
+    def close(self) -> None:
+        if self._graph is not None:
+            self._graph.close()
+            self._graph = None
+
+    def __getattr__(self, name: str):
+        # Only reached for names that are not real attributes, i.e. the query
+        # methods the tools call. Connecting here is what makes it lazy.
+        return getattr(self.connect(), name)
+
+
+def build_server(settings: Neo4jSettings | None = None, graph: Any = None):
+    """Construct a FastMCP server with graph tools bound to a lazy connection.
+
+    ``graph`` injects a ready-made query object instead of connecting, mirroring
+    the ``connect=`` seam :func:`graphforge.ui.server.route` already uses, so the
+    tools can be exercised without a database or the MCP runtime.
+    """
     from mcp.server.fastmcp import FastMCP  # lazy: only needed to actually serve
 
     settings = settings or load_settings().neo4j
-    gq = GraphQuery.connect(settings)
+    gq = graph if graph is not None else LazyGraph(settings)
     server = FastMCP("graphforge")
 
     def _json(obj: Any) -> str:

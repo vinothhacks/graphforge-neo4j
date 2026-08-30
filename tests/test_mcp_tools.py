@@ -796,14 +796,15 @@ def _build_server_with_fakes(driver):
     mcp_pkg = types.ModuleType("mcp")
     mcp_pkg.server = mcp_server
     saved = {name: sys.modules.get(name) for name in ("mcp", "mcp.server", "mcp.server.fastmcp")}
-    original_connect = GraphQuery.connect
     try:
         sys.modules.update({"mcp": mcp_pkg, "mcp.server": mcp_server,
                             "mcp.server.fastmcp": fastmcp})
-        GraphQuery.connect = classmethod(lambda cls, settings: cls(driver, settings.database))
-        mcp.build_server(Neo4jSettings(uri="bolt://x:7687", database="neo4j"))
+        # Inject the graph rather than monkeypatching GraphQuery.connect: the
+        # connection is lazy now, so a patch that only spans build_server would
+        # be long gone by the time a tool actually calls through.
+        mcp.build_server(Neo4jSettings(uri="bolt://x:7687", database="neo4j"),
+                         graph=GraphQuery(driver, "neo4j"))
     finally:
-        GraphQuery.connect = original_connect
         for name, module in saved.items():
             if module is None:
                 sys.modules.pop(name, None)

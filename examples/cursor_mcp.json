@@ -1,15 +1,9 @@
 {
-  "_comment": "Cursor project MCP config. Copy to .cursor/mcp.json (gitignored) and replace the password. Equivalent command: python -m graphforge mcp",
+  "_comment": "You almost certainly do not need this file. Run `graphforge mcp install --client cursor` and it writes .cursor/mcp.json for you, with the console script resolved from the interpreter graphforge is actually installed into rather than whatever `graphforge` happens to mean on PATH. Use this only to merge by hand: copy to .cursor/mcp.json (gitignored) and make both paths absolute. There is no password here on purpose -- --env points at your .env so the secret lives in one place. `python -m graphforge mcp` is the same server if the console script is not on PATH.",
   "mcpServers": {
     "graphforge": {
-      "command": "graphforge",
-      "args": ["mcp"],
-      "env": {
-        "NEO4J_URI": "bolt://127.0.0.1:7687",
-        "NEO4J_USER": "neo4j",
-        "NEO4J_PASSWORD": "please-change-me",
-        "NEO4J_DATABASE": "neo4j"
-      }
+      "command": "/absolute/path/to/graphforge",
+      "args": ["mcp", "--env", "/absolute/path/to/.env"]
     }
   }
 }

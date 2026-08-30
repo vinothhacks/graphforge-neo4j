@@ -90,19 +90,36 @@ The server is stdio, read-only, and talks to the same Neo4j as the CLI:
 graphforge mcp
 ```
 
-**Claude Desktop** (or any client that reads `mcpServers`): merge
+You do not have to wire that up by hand:
+
+```bash
+graphforge mcp install                      # every client we know about
+graphforge mcp install --client cursor      # or just one
+graphforge mcp install --dry-run            # show what would be written
+graphforge mcp install --remove             # undo
+```
+
+It knows the per-OS path for Claude Desktop, and writes `.mcp.json` for Claude
+Code and `.cursor/mcp.json` for Cursor. Two details worth knowing:
+
+- **The command is resolved from the interpreter graphforge is installed into**,
+  not from `PATH`. A `PATH` lookup is how a config ends up pointing at some other
+  project's virtualenv and failing weeks later.
+- **No password is written.** The entry passes `--env /path/to/your/.env`, so the
+  secret stays in one file instead of being copied into every client config.
+
+Restart the client (or reload its MCP servers) afterwards. `graphforge doctor`
+reports which clients are wired up.
+
+If you would rather merge by hand, the shape is in
 [`examples/claude_desktop_config.json`](../examples/claude_desktop_config.json)
-into the client's config. Fill in `NEO4J_PASSWORD`; leave everything else as
-placeholders until you change them.
+and [`examples/cursor_mcp.json`](../examples/cursor_mcp.json). `.cursor/mcp.json`
+is gitignored — do not force-add it. `python -m graphforge mcp` is the same
+server if the console script is not on `PATH`.
 
-**Cursor:** copy [`examples/cursor_mcp.json`](../examples/cursor_mcp.json) to
-`.cursor/mcp.json` in this repo (or into your user MCP config). That path is
-gitignored — do not force-add it. The example uses the `graphforge` console
-script; `python -m graphforge mcp` is the same server if the script is not
-on `PATH`. Restart Cursor (or reload MCP servers) after editing.
-
-The password in both examples is the placeholder `please-change-me`. Replace
-it locally; never commit a real host, user, or password.
+The server starts whether or not Neo4j is reachable: if the database is down the
+client still connects and still lists the tools, and the first question you ask
+answers with the reason. Start Neo4j and the next call works — no client restart.
 
 ## 5. Search the graph
 

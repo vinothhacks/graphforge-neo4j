@@ -18,6 +18,7 @@ from pathlib import Path
 
 from . import __version__
 from .core.config import Settings, load_settings
+from .core.errors import neo4j_advice
 from .core.neo4j_writer import Neo4jWriter, load_schema
 
 log = logging.getLogger("graphforge.cli")
@@ -58,39 +59,6 @@ def _settings(args) -> Settings:
         s.neo4j.database = args.neo4j_database
     _RESOLVED = s
     return s
-
-
-def neo4j_advice(exc: BaseException, settings: Settings | None = None) -> str | None:
-    """Turn a Neo4j driver exception into one actionable line.
-
-    Returns ``None`` for anything that is not a driver error, so the caller can
-    re-raise. The driver is never imported here: every ``neo4j.exceptions`` type
-    descends from ``Exception`` rather than from anything we already catch, and
-    importing to find that out would defeat ``--emit`` / ``--dry-run`` staying
-    driver-free.
-    """
-    if not (type(exc).__module__ or "").startswith("neo4j"):
-        return None
-    name = type(exc).__name__
-    detail = str(exc).strip().splitlines()[0] if str(exc).strip() else name
-    neo = settings.neo4j if settings else None
-    uri = neo.uri if neo else "the configured URI"
-
-    if name in {"ServiceUnavailable", "SessionExpired"} or "Couldn't connect" in detail:
-        return (f"cannot reach Neo4j at {uri}\n"
-                "  start one with `docker compose up -d`, or point --neo4j-uri elsewhere")
-    if name == "AuthError" or "authentication failure" in detail.lower():
-        user = neo.user if neo else "neo4j"
-        return (f"Neo4j rejected the credentials for user {user!r}\n"
-                "  set NEO4J_PASSWORD in your .env, or pass --neo4j-password")
-    if "database does not exist" in detail.lower() or (
-            name == "ClientError" and "DatabaseNotFound" in detail):
-        db = neo.database if neo else "the configured database"
-        return (f"Neo4j has no database named {db!r}\n"
-                "  Community Edition only ever has 'neo4j' - check NEO4J_DATABASE")
-    if name == "ConfigurationError":
-        return f"Neo4j connection is misconfigured: {detail}\n  check NEO4J_URI ({uri})."
-    return f"Neo4j error ({name}): {detail}"
 
 
 def _writer(s: Settings, args) -> Neo4jWriter:

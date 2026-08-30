@@ -183,6 +183,37 @@ def test_uninstall_removes_only_graphforge(tmp_path):
     assert written["mcpServers"]["other"] == {"command": "x"}
 
 
+# ------------------------------------------------------ mcp starts anyway --
+def test_the_mcp_server_does_not_connect_until_a_tool_is_used(monkeypatch):
+    """An MCP server that exits at startup shows up as "server exited", nothing more.
+
+    Connecting lazily means the client still starts and still lists the tools, so
+    the reason reaches whoever asks a question -- and starting Neo4j afterwards
+    is enough, with no client restart.
+    """
+    from graphforge.mcp.server import LazyGraph
+
+    attempts = []
+
+    def boom(_settings):
+        attempts.append(1)
+        raise _named("ServiceUnavailable", "Couldn't connect to 127.0.0.1:7687")
+
+    monkeypatch.setattr("graphforge.mcp.server.GraphQuery.connect", staticmethod(boom))
+    graph = LazyGraph(Neo4jSettings(password="pw"))
+    assert attempts == [], "constructing the server already opened a connection"
+
+    with pytest.raises(RuntimeError, match="cannot reach Neo4j"):
+        graph.get_schema()
+    assert attempts == [1]
+
+    # A failed attempt must not be cached, or the user has to restart the client
+    # after starting the database.
+    with pytest.raises(RuntimeError):
+        graph.get_schema()
+    assert attempts == [1, 1], "a failed connection was cached"
+
+
 def test_an_unknown_client_is_named_along_with_the_valid_ones():
     with pytest.raises(ValueError, match="unknown MCP client"):
         clients.client_by_key("emacs")
