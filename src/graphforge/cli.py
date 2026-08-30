@@ -15,6 +15,7 @@ import logging
 import os
 import sys
 from pathlib import Path
+from typing import Any
 
 from . import __version__
 from .core.config import Settings, load_settings
@@ -26,10 +27,15 @@ log = logging.getLogger("graphforge.cli")
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--env", metavar="FILE", help="path to a .env file to load")
-    p.add_argument("--neo4j-uri", dest="neo4j_uri")
-    p.add_argument("--neo4j-user", dest="neo4j_user")
-    p.add_argument("--neo4j-password", dest="neo4j_password")
-    p.add_argument("--neo4j-database", dest="neo4j_database")
+    p.add_argument("--neo4j-uri", dest="neo4j_uri", metavar="URI",
+                   help="override NEO4J_URI (default bolt://127.0.0.1:7687)")
+    p.add_argument("--neo4j-user", dest="neo4j_user", metavar="NAME",
+                   help="override NEO4J_USER (default neo4j)")
+    p.add_argument("--neo4j-password", dest="neo4j_password", metavar="PASSWORD",
+                   help="override NEO4J_PASSWORD (prefer .env: a password on the "
+                        "command line is visible to other users)")
+    p.add_argument("--neo4j-database", dest="neo4j_database", metavar="NAME",
+                   help="override NEO4J_DATABASE (Community Edition only has 'neo4j')")
 
 
 def _add_writer_opts(p: argparse.ArgumentParser) -> None:
@@ -64,6 +70,40 @@ def _settings(args) -> Settings:
 def _writer(s: Settings, args) -> Neo4jWriter:
     return Neo4jWriter(s.neo4j, emit_path=getattr(args, "emit", None),
                        dry_run=getattr(args, "dry_run", False))
+
+
+def print_table(headers: list[str], rows: list[list[Any]], *,
+                right: tuple[int, ...] = (), max_width: int = 46) -> None:
+    """Print an aligned table that survives real data.
+
+    Fixed widths (``f"{value:44s}"``) set a *minimum*, not a maximum, so any
+    value longer than its column shunts every column after it out of line -- and
+    real file paths are routinely longer than any width worth choosing. Columns
+    are measured here, and anything over ``max_width`` is truncated with an
+    ellipsis so the shape holds.
+    """
+    cells = [[("" if c is None else str(c)) for c in row] for row in rows]
+    for row in cells:
+        for i, value in enumerate(row):
+            if len(value) > max_width:
+                row[i] = value[: max_width - 3] + "..."
+    widths = [len(h) for h in headers]
+    for row in cells:
+        for i, value in enumerate(row):
+            widths[i] = max(widths[i], len(value))
+
+    def line(values: list[str]) -> str:
+        out = []
+        for i, value in enumerate(values):
+            # The last column is never padded: trailing spaces serve no one.
+            pad = "" if i == len(values) - 1 else " "
+            out.append((value.rjust(widths[i]) if i in right else
+                        (value if i == len(values) - 1 else value.ljust(widths[i]))) + pad)
+        return "".join(out).rstrip()
+
+    print(line(headers))
+    for row in cells:
+        print(line(row))
 
 
 def _report(writer: Neo4jWriter, extra: str = "") -> None:
@@ -271,10 +311,11 @@ def cmd_status(args) -> int:
     if not rows:
         print("[graphforge] no repositories ingested yet")
         return 0
-    print(f"{'repository':30s} {'status':12s} {'files':>7s} {'commits':>8s}  lastIngestedAt")
-    for r in rows:
-        print(f"{(r.get('name') or ''):30s} {(r.get('status') or ''):12s} "
-              f"{(r.get('files') or 0):>7} {(r.get('commits') or 0):>8}  {r.get('lastIngestedAt') or ''}")
+    print_table(
+        ["repository", "status", "files", "commits", "lastIngestedAt"],
+        [[r.get("name"), r.get("status"), r.get("files") or 0,
+          r.get("commits") or 0, r.get("lastIngestedAt")] for r in rows],
+        right=(2, 3))
     return 0
 
 
@@ -356,19 +397,15 @@ def cmd_search(args) -> int:
         print("[graphforge] no matches")
         return 0
     if args.kind == "schema":
-        print(f"{'labels':24s} {'name':32s} {'database':20s} table")
-        for row in rows:
-            labels = ",".join(row.get("labels") or [])
-            print(f"{labels:24s} {(row.get('name') or ''):32s} "
-                  f"{(row.get('database') or ''):20s} {row.get('table') or ''}")
+        print_table(["labels", "name", "database", "table"],
+                    [[",".join(row.get("labels") or []), row.get("name"),
+                      row.get("database"), row.get("table")] for row in rows])
     else:
-        print(f"{'labels':24s} {'name':32s} {'ref':44s} repo")
-        for row in rows:
-            labels = ",".join(row.get("labels") or [])
-            ref = row.get("ref") or row.get("database") or ""
-            print(f"{labels:24s} {(row.get('name') or ''):32s} "
-                  f"{ref:44s} {row.get('repo') or ''}")
-    more = f", {page['total']} total — pass a higher --limit" if page.get("hasMore") else ""
+        print_table(["labels", "name", "ref", "repo"],
+                    [[",".join(row.get("labels") or []), row.get("name"),
+                      row.get("ref") or row.get("database") or "", row.get("repo")]
+                     for row in rows])
+    more = f", {page['total']} total - pass a higher --limit" if page.get("hasMore") else ""
     print(f"[graphforge] {len(rows)} match(es){more}")
     return 0
 
@@ -380,7 +417,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="graphforge", description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--version", action="version", version=f"graphforge {__version__}")
-    parser.add_argument("-v", "--verbose", action="store_true")
+    parser.add_argument("-v", "--verbose", action="store_true",
+                        help="log what is happening, including per-source failures")
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="create graph constraints and indexes")
@@ -461,8 +499,12 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=cmd_status)
 
     p_ui = sub.add_parser("ui", help="serve a local web dashboard (config + load status)")
-    p_ui.add_argument("--host", default="127.0.0.1")
-    p_ui.add_argument("--port", type=int, default=8000)
+    p_ui.add_argument("--host", default="127.0.0.1", metavar="ADDR",
+                      help="address to bind (default 127.0.0.1). The dashboard has no "
+                           "authentication and /api/status reports your configuration, so "
+                           "binding publicly exposes it; guided ingest is disabled if you do")
+    p_ui.add_argument("--port", type=int, default=8000, metavar="N",
+                      help="port to listen on (default 8000)")
     _add_common(p_ui)
     p_ui.set_defaults(func=cmd_ui)
 
@@ -505,7 +547,8 @@ def build_parser() -> argparse.ArgumentParser:
                           help="code = File/Class/Method (default); schema = Table/Column/StoredProcedure")
     p_search.add_argument("--repo", default="", metavar="NAME",
                           help="limit hits to one repository name")
-    p_search.add_argument("--limit", type=int, default=25)
+    p_search.add_argument("--limit", type=int, default=25, metavar="N",
+                          help="maximum hits to print (default 25)")
     _add_common(p_search)
     p_search.set_defaults(func=cmd_search)
 

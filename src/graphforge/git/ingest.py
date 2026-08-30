@@ -248,11 +248,13 @@ class GitIngestor:
                     NodeRef("Package", {"id": pid})))
         self.writer.write(pkg_ops, desc=f"{repo}: packages")
 
-        # files (+ classes, methods, imports, optional lines) — flush per file
-        for f in files:
+        # Files (+ classes, methods, imports, optional lines), flushed per file so
+        # a long ingest is incremental. One bar over the loop, not one per write:
+        # a 5,000-file repository used to print 5,000 separate progress bars.
+        for f in tqdm(files, desc=f"{repo}: files", unit="file"):
             self.writer.write(
                 self._file_ops(repo, f, module_name_by_key, include_lines),
-                desc=f"{repo}: {f.name}",
+                progress=False,
             )
         return len(files)
 

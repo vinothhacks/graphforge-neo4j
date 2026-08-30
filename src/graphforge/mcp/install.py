@@ -53,7 +53,7 @@ def install(clients: list[str] | None = None, env_file: Path | None = None, *,
             client.path.parent.mkdir(parents=True, exist_ok=True)
             client.path.write_text(json.dumps(merged, indent=2) + "\n", encoding="utf-8")
         except OSError as exc:
-            lines.append(f"{client.label}: could not write {client.path} — {exc}")
+            lines.append(f"{client.label}: could not write {client.path} - {exc}")
             continue
         note = " (restart the client to pick it up)"
         lines.append(f"{client.label}: {action} in {client.path}{note}")
@@ -76,7 +76,7 @@ def uninstall(clients: list[str] | None = None, *,
                 json.dumps({**config, SERVERS_KEY: servers}, indent=2) + "\n",
                 encoding="utf-8")
         except OSError as exc:
-            lines.append(f"{client.label}: could not write {client.path} — {exc}")
+            lines.append(f"{client.label}: could not write {client.path} - {exc}")
             continue
         lines.append(f"{client.label}: removed from {client.path}")
     return lines

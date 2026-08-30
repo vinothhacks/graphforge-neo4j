@@ -563,7 +563,7 @@ def serve(settings: Settings, host: str = "127.0.0.1", port: int = 8000) -> None
     if not is_loopback_host(host):
         # /api/status reports the resolved Neo4j URI, database names, repository
         # names and hostnames. Passwords are masked; none of the rest is.
-        print(f"[graphforge] WARNING: bound to {host}, not loopback — the dashboard "
+        print(f"[graphforge] WARNING: bound to {host}, not loopback - the dashboard "
               "has no authentication and /api/status exposes your configuration")
     try:
         server.serve_forever()

@@ -103,7 +103,14 @@ class Neo4jWriter:
         return len(statements)
 
     # -- operations --------------------------------------------------------
-    def write(self, ops: Iterable[Operation], desc: str = "writing") -> int:
+    def write(self, ops: Iterable[Operation], desc: str = "writing", *,
+              progress: bool = True) -> int:
+        """Write ``ops``, batched. ``progress=False`` suppresses this call's bar.
+
+        Callers that write in a loop should own a single bar over the loop and
+        pass ``progress=False``: one bar per call means one bar *per file* during
+        a repository ingest, which prints thousands of them.
+        """
         ops = list(ops)
         if not ops:
             return 0
@@ -121,8 +128,9 @@ class Neo4jWriter:
 
         driver = self._driver_connect()
         batch_size = max(1, self.settings.batch_size)
+        starts = range(0, len(ops), batch_size)
         with driver.session(database=self.settings.database) as session:
-            for start in tqdm(range(0, len(ops), batch_size), desc=desc, unit="batch"):
+            for start in (tqdm(starts, desc=desc, unit="batch") if progress else starts):
                 batch = ops[start : start + batch_size]
                 session.execute_write(_run_batch, batch)
         self.ops_written += len(ops)
