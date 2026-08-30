@@ -143,10 +143,12 @@ def test_legacy_positional_calls_return_the_old_shapes():
         ("db.labels", [{"label": "Class"}]),
         ("db.relationshipTypes", [{"relationshipType": "IMPORTS"}]),
         ("count(n) AS c", [{"c": 7}]),
+        ("count(r) AS c", [{"c": 4}]),
     ])
     schema = GraphQuery(schema_driver, "neo4j").get_schema()
     assert schema == {"labels": ["Class"], "relationshipTypes": ["IMPORTS"],
-                      "nodeCountsByLabel": {"Class": 7}}
+                      "nodeCountsByLabel": {"Class": 7},
+                      "relationshipCountsByType": {"IMPORTS": 4}}
 
 
 def test_search_nodes_rejects_injected_identifiers_as_before():

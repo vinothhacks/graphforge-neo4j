@@ -90,7 +90,8 @@ class _StubGraph:
     def __init__(self, schema=None, raises=None):
         self.schema = schema or {"labels": ["Class", "Method"],
                                  "relationshipTypes": ["CALLS", "DECLARES"],
-                                 "nodeCountsByLabel": {"Class": 3, "Method": 11}}
+                                 "nodeCountsByLabel": {"Class": 3, "Method": 11},
+                                 "relationshipCountsByType": {"CALLS": 9, "DECLARES": 2}}
         self.raises = raises
         self.closed = False
 
@@ -308,8 +309,12 @@ def test_schema_endpoint_shape():
     code, payload = srv.route("/api/schema", "", None, _settings(), connect=lambda _s: _StubGraph())
     assert code == 200
     assert payload["labels"] == [{"name": "Method", "count": 11}, {"name": "Class", "count": 3}]
-    assert payload["relationshipTypes"] == ["CALLS", "DECLARES"]
-    assert payload["totals"] == {"labels": 2, "relationshipTypes": 2, "nodes": 14}
+    # Busiest first, and carrying counts: 25 alphabetical names with no numbers
+    # tell the reader nothing about the graph they are looking at.
+    assert payload["relationshipTypes"] == [
+        {"name": "CALLS", "count": 9}, {"name": "DECLARES", "count": 2}]
+    assert payload["totals"] == {"labels": 2, "relationshipTypes": 2,
+                                 "nodes": 14, "relationships": 11}
 
 
 def test_schema_payload_tolerates_a_ragged_schema():

@@ -380,19 +380,27 @@ graphforge ui        # then open http://localhost:8000
 
 A **zero-dependency** local page — Python's stdlib HTTP server, one hand-written HTML file, no npm, no build step, and no CDN, so it works on an air-gapped box. It gives you:
 
-- **Force-directed graph canvas** — a live sample of the graph rendered in a `<canvas>`; click a node to expand its neighbours.
-- **Cypher console** — run read-only queries in the browser, with query history. Writes are refused **server-side** (HTTP 400) before a connection is even opened; the client is never trusted.
+- **Add data** — load a repository or a database schema from the page, watching the log as it runs. This is the one thing on the dashboard that writes; see the gating note below.
+- **Graph canvas** — a live sample rendered in a `<canvas>`, with real node names rather than truncated ids. Drag a node, scroll to zoom, drag the background to pan, double-click to fit. Click any node for a side panel with its full id, degree, and neighbours grouped by relationship type.
+- **Clickable legend** — every label with its count; click one to hide or show it on the canvas.
+- **Cypher console** — run read-only queries in the browser, with query history. Writes are refused **server-side** (HTTP 400) before a connection is even opened, with the guard's own reason; the client is never trusted.
 - **Label explorer** — click any label in the counts table for a modal of sample nodes and their properties.
 - **Search** — find nodes by substring, across all labels or scoped to one.
-- **Light / dark theme**, remembered across visits.
+- **Light / dark theme**, remembered across visits; the canvas palette re-tunes for each.
 - **Keyboard shortcuts** — `r` refresh, `/` focus search, `Esc` close modal / clear results (`Ctrl`/`Cmd`+`Enter` runs the query from inside the Cypher box).
-- The original status view: your resolved configuration with **passwords masked**, Neo4j connection health, node counts by label, and per-repository / per-database load status.
+- The status view: your resolved configuration with **passwords masked**, Neo4j connection health, node counts by label, and per-repository / per-database load status.
 
 Behind it are seven read-only JSON endpoints: `GET /api/status`, `/api/schema`, `/api/graph/sample`, `/api/search`, `/api/labels/<label>/sample`, `/api/node/<id>/neighbors`, and `POST /api/query`. Every one validates its input *before* opening a connection, so a rejected request provably never reaches the database.
 
+**How "Add data" is gated.** The page has no authentication, so the browser is the only thing between it and any site you have open. The ingest endpoints therefore do not exist unless the server is bound to loopback, and every request to them must carry a per-run token that is served inside the page — which a cross-origin script cannot read. A foreign `Origin`, or a `Host` that is not loopback, is refused outright. Run `graphforge ui --host 0.0.0.0` and ingest is simply not there, and the command says so.
+
 ### Screenshots
 
-<img src="docs/img/dashboard.png" alt="graphforge dashboard: force-directed graph canvas, node counts by label, and the Cypher console" width="900">
+<img src="docs/img/dashboard.png" alt="graphforge dashboard: the graph canvas with a node selected, its neighbours grouped by relationship type in the detail panel, and node counts per label" width="900">
+
+The first thing you see with an empty graph:
+
+<img src="docs/img/dashboard-empty.png" alt="graphforge dashboard first run: an empty-graph panel explaining what graphforge does, with buttons to add a repository or a database" width="900">
 
 ---
 

@@ -1,5 +1,11 @@
 """Dashboard status payload: password masking + graceful degradation."""
+import re
+import shutil
+import subprocess
+import tempfile
 from pathlib import Path
+
+import pytest
 
 from graphforge.core.config import DbSettings, Neo4jSettings, Settings
 from graphforge.ui import build_status
@@ -36,6 +42,32 @@ def test_degrades_gracefully_without_neo4j():
 def _dashboard_html():
     import graphforge.ui.server as srv
     return (Path(srv.__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+
+
+def _inline_scripts(html: str) -> list[str]:
+    """Every inline <script> body in the dashboard, in document order."""
+    return [m.group(1) for m in
+            re.finditer(r"<script\b[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE)]
+
+
+@pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
+def test_the_dashboard_javascript_parses():
+    """A syntax error takes the whole page down silently, and nothing else catches it.
+
+    There is no build step and no bundler by design (ADR 2), so the first sign of
+    a stray duplicate `const` is a dashboard stuck on "checking…" with empty
+    skeletons -- no error visible anywhere but the browser console. `node --check`
+    is the cheapest possible stand-in for the parse the browser would do.
+    """
+    scripts = _inline_scripts(_dashboard_html())
+    assert scripts, "no inline script found in dashboard.html"
+    for index, body in enumerate(scripts):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / f"script{index}.js"
+            path.write_text(body, encoding="utf-8")
+            done = subprocess.run(["node", "--check", str(path)],
+                                  capture_output=True, text=True, check=False)
+        assert done.returncode == 0, f"inline script {index} does not parse:\n{done.stderr}"
 
 
 def test_dashboard_html_is_self_contained():

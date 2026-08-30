@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import json
 import logging
+import secrets
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -95,6 +96,8 @@ def build_status(settings: Settings) -> dict[str, Any]:
                 "nodes": sum(schema.get("nodeCountsByLabel", {}).values()),
                 "labels": len(schema.get("labels", [])),
                 "relationshipTypes": len(schema.get("relationshipTypes", [])),
+                "relationships": sum(
+                    _as_int(v) for v in (schema.get("relationshipCountsByType") or {}).values()),
             }
             status["repositories"] = gq._read(
                 "MATCH (r:Repository) RETURN r.name AS name, r.status AS status, "
@@ -176,16 +179,49 @@ def schema_payload(schema: dict[str, Any]) -> dict[str, Any]:
     pairs = [(str(n), _as_int(counts.get(n))) for n in names]
     pairs.sort(key=lambda p: (-p[1], p[0]))
     labels = [{"name": n, "count": c} for n, c in pairs]
-    rels = sorted(str(r) for r in (schema.get("relationshipTypes") or []))
+    rel_counts = schema.get("relationshipCountsByType") or {}
+    rel_pairs = [(str(r), _as_int(rel_counts.get(r)))
+                 for r in (schema.get("relationshipTypes") or [])]
+    # Busiest first, like the labels: 25 alphabetical chips with no numbers say
+    # nothing about the graph, and the useful ones end up buried mid-list.
+    rel_pairs.sort(key=lambda p: (-p[1], p[0]))
+    rels = [{"name": n, "count": c} for n, c in rel_pairs]
     return {"labels": labels, "relationshipTypes": rels,
             "totals": {"labels": len(labels), "relationshipTypes": len(rels),
-                       "nodes": sum(item["count"] for item in labels)}}
+                       "nodes": sum(item["count"] for item in labels),
+                       "relationships": sum(item["count"] for item in rels)}}
+
+
+#: Separators inside a deterministic node id, most specific last.
+_ID_SEPARATORS = ("#", "/", "\\", ":")
+
+
+def caption_for(node_id: str, name: Any = None) -> str:
+    """A short, human name for a node on the canvas.
+
+    Ids are deterministic URIs like
+    ``postgres://127.0.0.1/shopdb/public/products#product_id``. Truncating one to
+    fit under a dot gives ``postgres://127.0.0…`` — identical for every node in
+    the database, so six different tables all read the same. The last segment is
+    the part that actually identifies the node.
+    """
+    text = str(name).strip() if name not in (None, "") else ""
+    if text:
+        return text
+    tail = str(node_id)
+    cut = max(tail.rfind(sep) for sep in _ID_SEPARATORS)
+    return tail[cut + 1:] or tail
 
 
 def graph_sample_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
     """Fold ``(source, target, type)`` rows into ``{nodes, links}`` for the canvas."""
     nodes: dict[str, dict[str, Any]] = {}
     links: list[dict[str, Any]] = []
+
+    def _node(node_id: str, label: Any, name: Any) -> dict[str, Any]:
+        return {"id": node_id, "label": str(label or "Node"),
+                "caption": caption_for(node_id, name), "degree": 0}
+
     for row in rows or []:
         if not isinstance(row, dict):
             continue
@@ -193,8 +229,8 @@ def graph_sample_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
         if source is None or target is None:
             continue
         source, target = str(source), str(target)
-        nodes.setdefault(source, {"id": source, "label": str(row.get("sourceLabel") or "Node"), "degree": 0})
-        nodes.setdefault(target, {"id": target, "label": str(row.get("targetLabel") or "Node"), "degree": 0})
+        nodes.setdefault(source, _node(source, row.get("sourceLabel"), row.get("sourceName")))
+        nodes.setdefault(target, _node(target, row.get("targetLabel"), row.get("targetName")))
         nodes[source]["degree"] += 1
         nodes[target]["degree"] += 1
         links.append({"source": source, "target": target, "type": str(row.get("type") or "REL")})
@@ -230,9 +266,19 @@ def search_payload(rows: Any) -> list[dict[str, Any]]:
 # cypher used by the read-only endpoints (all identifiers validated first)
 # --------------------------------------------------------------------------
 _GRAPH_SAMPLE_CYPHER = (
+    # Deliberately the first $limit relationships in store order, not a random
+    # sample. Store order keeps related edges adjacent, so the canvas shows a
+    # connected neighbourhood; sampling at random returns edges that rarely share
+    # a node and draws a field of disconnected pairs instead of a graph.
+    # The cost is coverage: in a graph where one subgraph dwarfs the other, the
+    # smaller one may not appear. Use the label chips or search to reach it.
     "MATCH (n)-[r]->(m) WITH n, r, m LIMIT $limit "
     "RETURN coalesce(n.id, toString(id(n))) AS source, head(labels(n)) AS sourceLabel, "
+    # `short` is a Commit's 7-character sha; without it a commit captions as its
+    # full `repo@40-char-hash` id, which is unreadable at any truncation.
+    "coalesce(n.name, n.short, n.path, n.fqn) AS sourceName, "
     "coalesce(m.id, toString(id(m))) AS target, head(labels(m)) AS targetLabel, "
+    "coalesce(m.name, m.short, m.path, m.fqn) AS targetName, "
     "type(r) AS type"
 )
 _GENERIC_SEARCH_CYPHER = (
@@ -274,7 +320,8 @@ def _with_graph(settings: Settings, connect: Callable[[Settings], Any] | None,
 
 def route(path: str, query: str = "", body: Any = None, settings: Settings | None = None,
           *, method: str = "GET",
-          connect: Callable[[Settings], Any] | None = None) -> tuple[int, Any]:
+          connect: Callable[[Settings], Any] | None = None,
+          ingest: Any = None) -> tuple[int, Any]:
     """Resolve an ``/api/...`` request to ``(http_status, json_payload)``.
 
     Pure with respect to the network: pass `connect` to inject a fake graph.
@@ -315,12 +362,46 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
         return _with_graph(settings, connect,
                            lambda g: rows_payload(g.read_cypher(cypher, limit=limit)))
 
+    if rest == ["ingest"] and method == "POST":
+        # Absent when the dashboard is not bound to loopback: the endpoints do
+        # not exist rather than existing-and-refusing, so a public bind exposes
+        # no ingest surface at all.
+        if ingest is None:
+            return 404, {"error": "ingest is disabled (dashboard is not bound to loopback)"}
+        try:
+            payload = parse_body(body)
+        except ValueError as exc:
+            return 400, {"error": f"invalid JSON body: {exc}"}
+        try:
+            job = ingest.start(str(payload.get("kind") or ""),
+                               str(payload.get("source") or ""),
+                               str(payload.get("name") or ""))
+        except ValueError as exc:
+            return 400, {"error": str(exc)}
+        return 202, job.payload()
+
     if method != "GET":
         return 405, {"error": f"{method} not allowed for {clean}"}
 
     # -- GET --------------------------------------------------------------
     if rest == ["status"]:
-        return 200, build_status(settings)
+        payload = build_status(settings)
+        payload["ingest"] = {"enabled": ingest is not None,
+                             "running": bool(ingest and ingest.running())}
+        return 200, payload
+
+    if rest == ["ingest"]:
+        if ingest is None:
+            return 404, {"error": "ingest is disabled (dashboard is not bound to loopback)"}
+        return 200, {"jobs": ingest.recent()}
+
+    if len(rest) == 2 and rest[0] == "ingest":
+        if ingest is None:
+            return 404, {"error": "ingest is disabled (dashboard is not bound to loopback)"}
+        job = ingest.get(rest[1])
+        if job is None:
+            return 404, {"error": f"no such ingest job: {rest[1]}"}
+        return 200, job.payload()
 
     if rest == ["schema"]:
         return _with_graph(settings, connect, lambda g: schema_payload(g.get_schema()))
@@ -377,9 +458,22 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
 # --------------------------------------------------------------------------
 # http plumbing
 # --------------------------------------------------------------------------
-def _handler(settings: Settings, bind_host: str = "127.0.0.1"):
+def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: bool = True):
     html = (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
     loopback_bind = is_loopback_host(bind_host)
+
+    # Ingest exists only on a loopback bind. The token is minted per run and
+    # served inside the HTML: a cross-origin page cannot read another origin's
+    # document, so it cannot obtain the header it would need to forge a request.
+    jobs = None
+    token = ""
+    if loopback_bind and allow_ingest:
+        from .ingest import IngestJobs
+
+        jobs = IngestJobs(settings)
+        token = secrets.token_urlsafe(24)
+        html = html.replace("<!--gf-token-->",
+                            f'<meta name="gf-token" content="{token}" />')
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "graphforge-ui"
@@ -428,8 +522,14 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1"):
                 return
             parsed = urlsplit(self.path)
             if parsed.path == "/api" or parsed.path.startswith("/api/"):
+                # Anything that can change the graph needs the per-run token.
+                if (parsed.path.startswith("/api/ingest") and method != "GET"
+                        and (not token or self.headers.get("X-GF-Token") != token)):
+                    self._json(403, {"error": "missing or invalid X-GF-Token"})
+                    return
                 try:
-                    code, payload = route(parsed.path, parsed.query, body, settings, method=method)
+                    code, payload = route(parsed.path, parsed.query, body, settings,
+                                          method=method, ingest=jobs)
                 except Exception as exc:  # noqa: BLE001 — last-ditch: still answer with JSON
                     log.exception("dashboard route failed for %s", self.path)
                     code, payload = 500, {"error": str(exc)}

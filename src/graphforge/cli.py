@@ -285,9 +285,12 @@ def cmd_ui(args) -> int:
     try:
         serve(s, host=args.host, port=args.port)
     except OSError as exc:
-        if getattr(exc, "errno", None) in (48, 98, 10048):  # EADDRINUSE, incl. WSAEADDRINUSE
+        # EADDRINUSE (48 BSD / 98 Linux / 10048 Windows), plus WSAEACCES (10013),
+        # which is what Windows returns for a port inside a reserved exclusion
+        # range -- unavailable for the same reason, from the user's point of view.
+        if getattr(exc, "errno", None) in (48, 98, 10013, 10048):
             raise RuntimeError(
-                f"port {args.port} is already in use — "
+                f"port {args.port} is not available - "
                 f"try `graphforge ui --port {args.port + 1}`") from exc
         raise
     return 0

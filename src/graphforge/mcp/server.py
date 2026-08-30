@@ -72,6 +72,7 @@ def _copy_schema(schema: dict) -> dict:
         "labels": list(schema.get("labels") or []),
         "relationshipTypes": list(schema.get("relationshipTypes") or []),
         "nodeCountsByLabel": dict(schema.get("nodeCountsByLabel") or {}),
+        "relationshipCountsByType": dict(schema.get("relationshipCountsByType") or {}),
     }
 
 
@@ -213,7 +214,15 @@ class GraphQuery:
         for label in labels:
             rec = self._read(f"MATCH (n:`{label}`) RETURN count(n) AS c")
             counts[label] = rec[0]["c"] if rec else 0
-        return {"labels": labels, "relationshipTypes": rels, "nodeCountsByLabel": counts}
+        # One query per type rather than a single grouped scan: this form reads
+        # the relationship count store and is constant-time, where
+        # `MATCH ()-[r]->() RETURN type(r), count(*)` walks every relationship.
+        rel_counts = {}
+        for rel in rels:
+            rec = self._read(f"MATCH ()-[r:`{rel}`]->() RETURN count(r) AS c")
+            rel_counts[rel] = rec[0]["c"] if rec else 0
+        return {"labels": labels, "relationshipTypes": rels, "nodeCountsByLabel": counts,
+                "relationshipCountsByType": rel_counts}
 
     # -- tools -------------------------------------------------------------
     def read_cypher(self, query: str, params: dict[str, Any] | None = None, limit: int = 200) -> list[dict]:
