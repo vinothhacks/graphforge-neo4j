@@ -33,9 +33,8 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from ..core.config import Settings
 from ..mcp.server import _IDENT as _IDENT_RE
-from ..mcp.server import _WRITE as _WRITE_RE  # noqa: F401 — imported for test identity
 from ..mcp.server import GraphQuery
-from ..query_guard import is_denied as _query_denied
+from ..query_guard import check_read_query as _query_denial
 
 log = logging.getLogger("graphforge.ui")
 
@@ -43,11 +42,26 @@ log = logging.getLogger("graphforge.ui")
 MAX_LIMIT = 500
 #: Largest accepted request body (the Cypher console posts a few hundred bytes).
 MAX_BODY = 64 * 1024
-#: Message returned when the server-side write guard rejects a query.
-WRITE_REJECTED = (
-    "read-only console: writes are rejected "
-    "(no CREATE/MERGE/DELETE/SET/REMOVE/DROP/DETACH)"
-)
+#: Hosts the guided-ingest endpoints will answer on. Anything else and they do
+#: not exist: binding publicly turns the dashboard back into a pure viewer.
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "[::1]"})
+
+
+def _host_only(netloc: str) -> str:
+    """Strip credentials and port from a ``Host`` / ``Origin`` authority."""
+    value = (netloc or "").strip()
+    if "@" in value:
+        value = value.rsplit("@", 1)[1]
+    if value.startswith("["):  # bracketed IPv6, optionally with a port
+        return value[: value.index("]") + 1] if "]" in value else value
+    if value.count(":") == 1:  # host:port — a bare IPv6 has more colons
+        value = value.split(":", 1)[0]
+    return value
+
+
+def is_loopback_host(host: str) -> bool:
+    """True when an authority names this machine and nothing else."""
+    return _host_only(host).lower() in LOOPBACK_HOSTS
 
 
 def _mask(secret: str) -> str:
@@ -115,9 +129,18 @@ def is_identifier(name: str) -> bool:
     return bool(name) and _IDENT_RE.fullmatch(name) is not None
 
 
+def query_denial(cypher: str) -> str | None:
+    """Reuse the MCP read-query gate so both surfaces reject the same things.
+
+    Returns the guard's own reason, so the console can say *why* — a query
+    rejected for calling an unlisted procedure no longer claims to be a write.
+    """
+    return _query_denial(cypher or "")
+
+
 def is_write_query(cypher: str) -> bool:
-    """Reuse the MCP read-query gate so both surfaces reject the same things."""
-    return _query_denied(cypher or "")
+    """Back-compat boolean form of :func:`query_denial`."""
+    return query_denial(cypher) is not None
 
 
 def _first(params: dict[str, list[str]], key: str, default: str = "") -> str:
@@ -283,10 +306,11 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
             return 400, {"error": "missing 'cypher' in request body"}
         if len(cypher) > 8000:
             return 400, {"error": "query too long (max 8000 characters)"}
-        # Server-side write guard: checked here *before* connecting, and again
+        # Server-side read guard: checked here *before* connecting, and again
         # inside GraphQuery.read_cypher. The client is never trusted.
-        if is_write_query(cypher):
-            return 400, {"error": WRITE_REJECTED}
+        denial = query_denial(cypher)
+        if denial:
+            return 400, {"error": denial}
         limit = clamp_limit(payload.get("limit", limit_param), 200)
         return _with_graph(settings, connect,
                            lambda g: rows_payload(g.read_cypher(cypher, limit=limit)))
@@ -353,11 +377,38 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
 # --------------------------------------------------------------------------
 # http plumbing
 # --------------------------------------------------------------------------
-def _handler(settings: Settings):
+def _handler(settings: Settings, bind_host: str = "127.0.0.1"):
     html = (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+    loopback_bind = is_loopback_host(bind_host)
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "graphforge-ui"
+
+        def _rejected_origin(self) -> str | None:
+            """Reason to refuse this request outright, or ``None`` to proceed.
+
+            The dashboard is a local tool with no authentication, so the browser
+            is the only thing standing between it and any page the user happens
+            to have open. Two holes get closed here:
+
+            * **DNS rebinding** — ``evil.com`` can be made to resolve to
+              ``127.0.0.1``, so a loopback-bound server must refuse any ``Host``
+              that is not itself loopback.
+            * **Drive-by CSRF** — a cross-origin ``fetch`` with
+              ``Content-Type: text/plain`` is a *simple* request and is sent with
+              no preflight, so a foreign ``Origin`` is refused rather than run.
+            """
+            if loopback_bind and not is_loopback_host(self.headers.get("Host", "")):
+                return "unexpected Host header (dashboard is bound to loopback)"
+            origin = (self.headers.get("Origin") or "").strip()
+            if not origin:
+                return None
+            if origin.lower() == "null":
+                return "cross-origin request rejected"
+            if _host_only(urlsplit(origin).netloc).lower() != _host_only(
+                    self.headers.get("Host", "")).lower():
+                return "cross-origin request rejected"
+            return None
 
         def _send(self, code: int, ctype: str, body: bytes) -> None:
             self.send_response(code)
@@ -371,6 +422,10 @@ def _handler(settings: Settings):
             self._send(code, "application/json", json.dumps(payload, default=str).encode("utf-8"))
 
         def _dispatch(self, method: str, body: bytes | None = None) -> None:
+            refused = self._rejected_origin()
+            if refused:
+                self._json(403, {"error": refused})
+                return
             parsed = urlsplit(self.path)
             if parsed.path == "/api" or parsed.path.startswith("/api/"):
                 try:
@@ -402,9 +457,14 @@ def _handler(settings: Settings):
 
 
 def serve(settings: Settings, host: str = "127.0.0.1", port: int = 8000) -> None:
-    server = ThreadingHTTPServer((host, port), _handler(settings))
+    server = ThreadingHTTPServer((host, port), _handler(settings, host))
     url = f"http://{host}:{port}"
     print(f"[graphforge] dashboard on {url}  (Ctrl+C to stop)")
+    if not is_loopback_host(host):
+        # /api/status reports the resolved Neo4j URI, database names, repository
+        # names and hostnames. Passwords are masked; none of the rest is.
+        print(f"[graphforge] WARNING: bound to {host}, not loopback — the dashboard "
+              "has no authentication and /api/status exposes your configuration")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

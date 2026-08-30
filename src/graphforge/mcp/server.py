@@ -38,7 +38,11 @@ from typing import Any, ClassVar
 from ..core.config import Neo4jSettings, load_settings
 
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-_WRITE = re.compile(r"\b(CREATE|MERGE|DELETE|SET|REMOVE|DROP|DETACH|CALL\s+apoc\.\w+\.(?:create|delete))\b", re.IGNORECASE)
+#: A LIMIT clause the user actually wrote, and a RETURN that can carry one.
+#: Both are matched against masked text so a LIMIT inside a string literal
+#: is treated as data, not as a clause.
+_HAS_LIMIT = re.compile(r"\bLIMIT\b", re.IGNORECASE)
+_HAS_RETURN = re.compile(r"\bRETURN\b", re.IGNORECASE)
 
 #: Default lifetime of a cached ``get_schema`` snapshot, in seconds.
 DEFAULT_SCHEMA_TTL = 60.0
@@ -216,16 +220,24 @@ class GraphQuery:
             READ_TX_TIMEOUT_SECONDS,
             check_read_query,
             clamp_read_limit,
+            mask_query,
         )
 
         reason = check_read_query(query, limit)
         if reason:
             raise ValueError(reason)
         limit = clamp_read_limit(limit)
-        stripped = query.lstrip().upper()
-        if " LIMIT " not in stripped and not stripped.startswith("CALL"):
+        # Decide on masked text. Matching the raw query got two things wrong: a
+        # newline before LIMIT is formatting, not absence of a cap (so multi-line
+        # Cypher had a second LIMIT appended -- a syntax error), and a " LIMIT "
+        # inside a string literal is data, not a clause (so the cap was skipped).
+        masked = mask_query(query)
+        if _HAS_RETURN.search(masked) and not _HAS_LIMIT.search(masked):
             query = query.rstrip("; \n") + f"\nLIMIT {int(limit)}"
-        return self._read(query, params, timeout=READ_TX_TIMEOUT_SECONDS)
+        rows = self._read(query, params, timeout=READ_TX_TIMEOUT_SECONDS)
+        # Backstop for shapes that cannot carry a LIMIT clause: a standalone
+        # CALL is a syntax error with one appended, so it is capped here.
+        return rows[:limit]
 
     def search_nodes(self, label: str, prop: str, value: str, limit: int = 25,
                      offset: int = 0) -> list[dict]:

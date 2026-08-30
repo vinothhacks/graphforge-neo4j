@@ -401,6 +401,78 @@ def test_status_route_masks_passwords():
     assert "topsecret" not in blob and "dbsecret" not in blob
 
 
+@pytest.mark.parametrize("authority,expected", [
+    ("127.0.0.1", True),
+    ("127.0.0.1:8000", True),
+    ("localhost:8000", True),
+    ("[::1]:8000", True),
+    ("::1", True),
+    ("evil.com", False),
+    ("evil.com:8000", False),
+    ("127.0.0.1.evil.com", False),
+    ("user@evil.com", False),
+    ("", False),
+])
+def test_is_loopback_host_reads_the_authority_not_the_string(authority, expected):
+    assert srv.is_loopback_host(authority) is expected
+
+
+def test_a_foreign_origin_is_refused_before_the_route_runs():
+    """Drive-by CSRF: a page the user has open must not be able to drive the console.
+
+    A cross-origin `fetch` with `Content-Type: text/plain` is a *simple* request
+    and is sent with no preflight, so the browser will not stop it — the server
+    has to. The attacker cannot read the reply, but for a procedure with a side
+    effect, firing it is enough.
+    """
+    from http.server import ThreadingHTTPServer
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), srv._handler(_settings()))
+    port = server.server_address[1]
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    base = f"http://127.0.0.1:{port}"
+    spy = _Spy()
+    try:
+        for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"}):
+            request = urllib.request.Request(
+                base + "/api/query", method="POST",
+                data=json.dumps({"cypher": "MATCH (n) RETURN n"}).encode("utf-8"),
+                headers={"Content-Type": "text/plain", **headers})
+            try:
+                urllib.request.urlopen(request, timeout=10)
+                raise AssertionError(f"server accepted a cross-origin POST: {headers}")
+            except urllib.error.HTTPError as err:
+                assert err.code == 403, headers
+                assert "cross-origin" in json.loads(err.read().decode("utf-8"))["error"]
+
+        # DNS rebinding: evil.com can be pointed at 127.0.0.1, so a loopback-bound
+        # server must refuse any Host that is not itself loopback.
+        request = urllib.request.Request(
+            base + "/api/status", headers={"Host": "evil.example"})
+        try:
+            urllib.request.urlopen(request, timeout=10)
+            raise AssertionError("server answered a rebound Host header")
+        except urllib.error.HTTPError as err:
+            assert err.code == 403
+            assert "Host" in json.loads(err.read().decode("utf-8"))["error"]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+    assert spy.connections == 0
+
+
+def test_the_console_says_why_a_query_was_denied():
+    """Every denial used to claim to be a write, whatever the real reason was."""
+    code, payload = srv.route(
+        "/api/query", "", {"cypher": "CALL apoc.load.json('http://x/')"},
+        _settings(), method="POST", connect=_Spy())
+    assert code == 400
+    assert "apoc.load.json" in payload["error"], payload
+    assert "not allowlisted" in payload["error"], payload
+
+
 # ------------------------------------------------- one loopback smoke test --
 def test_handler_serves_the_shell_and_rejects_writes_over_the_wire():
     from http.server import ThreadingHTTPServer

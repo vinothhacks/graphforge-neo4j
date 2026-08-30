@@ -33,6 +33,17 @@ MUST_REJECT = [
     "USE system MATCH (n) RETURN n",
     "MATCH (n) RETURN n; CREATE (m)",
     "CALL some.procedure.that.does.not.exist()",
+    # Backtick-quoted procedure names. Cypher accepts these; the allowlist used
+    # to never see them, because the name matched no bare-identifier pattern and
+    # an unparseable CALL was simply not checked. Deny-by-default now applies.
+    "CALL `apoc.util.sleep`(1000)",
+    "CALL `apoc.load.json`('http://127.0.0.1:1/')",
+    "CALL `dbms.security.listUsers`()",
+    "CALL `apoc`.util.sleep(1000)",
+    "CALL apoc.`util`.sleep(1000)",
+    "CALL `db.labels`() YIELD label CALL `apoc.x`() RETURN 1",
+    # A CALL whose target cannot be read at all is a denial, not a pass.
+    "MATCH (n) CALL",
 ]
 
 MUST_ALLOW = [
@@ -43,6 +54,12 @@ MUST_ALLOW = [
     "MATCH (n:Create) RETURN n",
     "MATCH (n) RETURN n.deleted",
     "EXPLAIN MATCH (n) RETURN n",
+    # A backtick-quoted identifier is data to the guard, not code: a keyword
+    # inside one must not trip the write-clause check, and a `CALL ...` label
+    # must not be mistaken for an actual procedure call.
+    "MATCH (n:`Pending DELETE`) RETURN n",
+    "MATCH (n) WHERE n.`weird CREATE prop` IS NOT NULL RETURN n",
+    "MATCH (n:`CALL apoc.util.sleep`) RETURN n",
 ]
 
 

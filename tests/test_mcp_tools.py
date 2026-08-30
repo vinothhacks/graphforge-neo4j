@@ -15,7 +15,7 @@ import pytest
 
 from graphforge.core.config import DbSettings, Neo4jSettings, Settings
 from graphforge.mcp import server as mcp
-from graphforge.mcp.server import _IDENT, _WRITE, GraphQuery
+from graphforge.mcp.server import _IDENT, GraphQuery
 
 
 # ---------------------------------------------------------------- fakes ----
@@ -114,12 +114,14 @@ def _settings(neo_pw="topsecret", db_pw="dbsecret"):
 
 # ============================================================ backward compat ==
 def test_ui_server_still_imports_the_names_it_depends_on():
-    """graphforge.ui.server does `from ..mcp.server import GraphQuery, _WRITE, _IDENT`."""
+    """graphforge.ui.server does `from ..mcp.server import GraphQuery, _IDENT`."""
     from graphforge.ui import server as ui
 
     assert ui.GraphQuery is GraphQuery
-    assert ui._WRITE_RE is _WRITE
     assert ui._IDENT_RE is _IDENT
+    # There is exactly one write guard, and it is query_guard. The old `_WRITE`
+    # regex it replaced is gone; nothing may reintroduce a second one.
+    assert not hasattr(ui, "_WRITE_RE")
     for name in ("read_cypher", "search_nodes", "get_schema", "node_neighbors", "_read"):
         assert callable(getattr(GraphQuery, name)), name
 
@@ -175,6 +177,35 @@ def test_read_cypher_still_appends_a_limit():
     assert "LIMIT 17" in graph.driver.cyphers[0]
     graph.read_cypher("MATCH (n) RETURN n LIMIT 3", limit=17)
     assert "LIMIT 17" not in graph.driver.cyphers[1]
+
+
+def test_a_limit_on_its_own_line_is_not_a_missing_limit():
+    """Multi-line Cypher is what an agent writes, and it used to get two LIMITs.
+
+    The old detector looked for `" LIMIT "` — with a leading space — so a
+    newline-formatted query looked uncapped and got a second clause appended,
+    producing `LIMIT 3\\nLIMIT 200`: a syntax error on every real server.
+    """
+    graph = GraphQuery(FakeDriver(), "neo4j")
+    graph.read_cypher("MATCH (n)\nRETURN n\nLIMIT 3", limit=200)
+    sent = graph.driver.cyphers[0]
+    assert sent.upper().count("LIMIT") == 1, sent
+
+
+def test_a_limit_inside_a_string_literal_does_not_suppress_the_cap():
+    """`' LIMIT '` as data used to read as `LIMIT` as code, skipping the row cap."""
+    graph = GraphQuery(FakeDriver(), "neo4j")
+    graph.read_cypher("MATCH (n) WHERE n.doc CONTAINS ' LIMIT ' RETURN n", limit=25)
+    assert "LIMIT 25" in graph.driver.cyphers[0]
+
+
+def test_a_standalone_call_is_capped_without_being_made_invalid():
+    """`CALL db.labels()` takes no LIMIT clause, so the cap is applied to the rows."""
+    driver = FakeDriver(rows=[{"label": f"L{i}"} for i in range(50)])
+    graph = GraphQuery(driver, "neo4j")
+    rows = graph.read_cypher("CALL db.labels()", limit=10)
+    assert "LIMIT" not in graph.driver.cyphers[0].upper(), "appending LIMIT breaks a standalone CALL"
+    assert len(rows) == 10, "a standalone CALL returned more rows than the cap"
 
 
 def test_ui_routes_still_work_over_the_new_module():

@@ -15,7 +15,7 @@ Executed via Cursor's `user-Playwright` MCP server against local playground
 | Step id | MCP operations | Assertion / Evidence | Status |
 |---------|----------------|----------------------|--------|
 | `no-external-fetch` | `browser_network_requests` `{static:true}` | 4 requests captured (`/`, `/api/status`, `/api/schema`, `/api/graph/sample`). All hosts `127.0.0.1:8000`. No third-party CDN/fonts/trackers. | `PASS` |
-| `write-rejected-400` | `browser_evaluate` `fetch('/api/query', {method:'POST', body:'{"cypher":"CREATE (n)"}'})` | Returned HTTP 400 (`{"error": "read-only console: writes are rejected..."}`). Additional checks for `MATCH (n) SET`, `LOAD CSV`, `CALL apoc...` also returned 400. | `PASS` |
+| `write-rejected-400` | `browser_evaluate` `fetch('/api/query', {method:'POST', body:'{"cypher":"CREATE (n)"}'})` | Returned HTTP 400 with the guard's own reason (`{"error": "read-only query: CREATE is not allowed"}`). Additional checks for `MATCH (n) SET`, `LOAD CSV`, `CALL apoc...` also returned 400. | `PASS` |
 | `password-never-served` | `browser_evaluate` `document.documentElement.outerHTML` | Secrets `graphforge-playground` and `please-change-me` absent. Masked strings `•••••• (set)` present. | `PASS` |
 | `canvas-expand` | Canvas click via bounding box offset | Highlighted node degree and neighbours populated in `#nodeinfo` (`products#product_id · Column · degree 2 · 2 neighbours...`). | `PASS` |
 | `console-history` | Cypher query entry + `Control+Enter` | History dropdown populated; query executed returning 5 rows for `MATCH (t:Table) RETURN t.name`. | `PASS` |
