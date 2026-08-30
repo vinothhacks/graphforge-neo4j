@@ -6,6 +6,66 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed — BREAKING
+
+- **Database drivers are now optional extras.** `pip install graphforge-neo4j` no
+  longer installs `mysql-connector-python`, `psycopg2-binary` and `pyodbc`; nor
+  `requests`, which only GitLab group discovery uses. Every one of them was
+  already imported lazily behind a guard, so bundling them only meant that
+  someone who wanted to graph a git repository still had to build `pyodbc` —
+  which needs a system ODBC driver and is the most likely of the three to fail
+  outright.
+
+  **To restore the previous behaviour in one line:**
+
+  ```bash
+  pip install 'graphforge-neo4j[all]'
+  ```
+
+  Or install just what you use: `[mysql]`, `[postgres]`, `[mssql]`, `[gitlab]`,
+  `[mcp]`. Running `graphforge db` against an engine whose driver is missing now
+  names the exact command to fix it, rather than the `pip install
+  'graphforge[mssql]'` it used to print — an extra that never existed, on a
+  distribution that is not called that.
+
+### Security
+
+- **Read guard: closed a bypass.** A backtick-quoted procedure name
+  (`` CALL `apoc.util.sleep`(1000) ``) matched no bare-identifier pattern, and an
+  unparseable `CALL` was simply not checked, so the deny-by-default allowlist was
+  never consulted. The allowlist now applies to every `CALL` site: a target that
+  cannot be resolved is a denial. Quoted identifiers are masked, which also fixes
+  the mirror-image false positive that rejected ``MATCH (n:`Pending DELETE`)``.
+- **Dashboard: drive-by CSRF and DNS rebinding.** A cross-origin `fetch` with
+  `Content-Type: text/plain` is a simple request and is sent with no preflight, so
+  any page you had open could reach the console. A foreign `Origin` is now
+  refused, and a loopback-bound server refuses any `Host` that is not loopback.
+- **Git credentials no longer travel in argv or the remote URL**, where they
+  reached `ps`, `.git/config`, and the git error text that `GitError` carried up
+  to the console. They go through a short-lived credential-helper file, and git
+  output is scrubbed before it is logged or raised.
+- `docker-compose.yml` no longer sets `apoc.*` unrestricted. graphforge needs no
+  APOC at all, and unrestricted grants `apoc.load.jdbc` / `apoc.load.json` —
+  outbound network and filesystem access — to anything that reaches the server.
+
+### Fixed
+
+- `read_cypher` corrupted multi-line Cypher. An existing `LIMIT` was detected by
+  searching the raw text for `" LIMIT "`, so a newline-formatted query looked
+  uncapped and got a second clause appended — `LIMIT 3\nLIMIT 200`, a syntax
+  error, on the shape an agent actually writes. A `" LIMIT "` inside a string
+  literal also suppressed the cap, and a standalone `CALL` was never capped.
+- Neo4j driver errors escaped as ~35-line tracebacks with exit code 1 instead of
+  the documented 2 — on `verify`, `init`, `status`, `search`, `ui`, and `mcp`.
+- `graphforge mcp` exited when the database was unreachable, so the client showed
+  only "server exited". The connection is now lazy: the client connects, the
+  tools list, and the reason reaches whoever asks a question.
+- A 5,000-file repository printed 5,000 progress bars, one per file.
+- `status` and `search` tables misaligned on any value longer than its fixed
+  column width — which is most real file paths.
+- `graphforge --version` reported a hardcoded `0.1.0` that had drifted from
+  `pyproject.toml`.
+
 ### Added
 
 - Layered read-query gate (`graphforge.query_guard`): procedure allowlist, clause

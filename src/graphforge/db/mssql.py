@@ -20,9 +20,8 @@ class MssqlExtractor(SchemaExtractor):
             import pyodbc
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
-                # There is no `graphforge` distribution and no `mssql` extra; the
-                # advice this replaces failed twice over for anyone who tried it.
-                "pyodbc is not installed. Run: pip install pyodbc "
+                "SQL Server support is not installed. Run: "
+                "pip install 'graphforge-neo4j[mssql]' "
                 "(a system ODBC driver for SQL Server is also required)."
             ) from exc
         driver = self.driver or "ODBC Driver 18 for SQL Server"

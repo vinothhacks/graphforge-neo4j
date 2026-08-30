@@ -97,3 +97,61 @@ def test_the_version_fallback_cannot_be_mistaken_for_a_release():
     text = Path(source).read_text(encoding="utf-8")
     assert '"0+unknown"' in text, "the fallback is a literal release number again"
     assert __version__, "no version resolved at all"
+
+
+# ------------------------------------------------------------------ extras --
+@pytest.mark.parametrize("engine,module,extra", [
+    ("mssql", "pyodbc", "mssql"),
+    ("mysql", "mysql.connector", "mysql"),
+    ("postgres", "psycopg2", "postgres"),
+])
+def test_a_missing_driver_names_an_extra_that_exists(engine, module, extra, monkeypatch):
+    """The old advice was `pip install 'graphforge[mssql]'` — wrong extra, wrong dist.
+
+    Drivers are optional as of 0.3, so this message is now the whole of the
+    recovery path for anyone who installed the core package.
+    """
+    import builtins
+    from pathlib import Path
+
+    import tomllib
+
+    from graphforge.db import get_extractor
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == module or name.startswith(module + "."):
+            raise ImportError("simulated missing driver")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    extractor = get_extractor(engine, host="h", port=1, user="u", password="p")
+    with pytest.raises(RuntimeError) as err:
+        extractor.connect("db")
+
+    message = str(err.value)
+    assert f"graphforge-neo4j[{extra}]" in message, message
+
+    # And the extra it names is really declared.
+    pyproject = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    assert extra in pyproject["project"]["optional-dependencies"], \
+        f"{extra} is advertised but not declared"
+
+
+def test_all_extra_restores_every_optional_dependency():
+    """`[all]` is the documented one-line way back to the pre-0.3 install."""
+    from pathlib import Path
+
+    import tomllib
+
+    pyproject = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = pyproject["project"]["optional-dependencies"]
+    everything = set()
+    for name, pins in extras.items():
+        if name not in ("dev", "all"):
+            everything.update(pins)
+    assert everything <= set(extras["all"]), \
+        f"[all] is missing: {everything - set(extras['all'])}"

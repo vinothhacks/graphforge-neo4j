@@ -18,7 +18,8 @@ class MySQLExtractor(SchemaExtractor):
             import mysql.connector
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
-                "mysql-connector-python is not installed. Run: pip install mysql-connector-python"
+                "MySQL support is not installed. Run: "
+                "pip install 'graphforge-neo4j[mysql]'"
             ) from exc
         kwargs = {"host": self.host, "port": self.port, "user": self.user, "password": self.password}
         if database:  # omit to connect at server level (for discovery)

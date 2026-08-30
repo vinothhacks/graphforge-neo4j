@@ -14,7 +14,8 @@ class PostgresExtractor(SchemaExtractor):
             import psycopg2
         except ImportError as exc:  # pragma: no cover
             raise RuntimeError(
-                "psycopg2 is not installed. Run: pip install psycopg2-binary"
+                "PostgreSQL support is not installed. Run: "
+                "pip install 'graphforge-neo4j[postgres]'"
             ) from exc
         return psycopg2.connect(
             host=self.host, port=self.port, user=self.user,

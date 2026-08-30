@@ -53,12 +53,16 @@ A single Cypher traversal answers each of these. Doing the same with two separat
 ## Install
 
 ```bash
-pip install graphforge-neo4j            # Neo4j + MySQL/PostgreSQL/SQL Server drivers bundled
-pip install "graphforge-neo4j[mcp]"     # add the MCP server
-cp .env.example .env                    # then set your Neo4j password in .env
+pip install graphforge-neo4j                  # core: git ingest + the graph
+pip install "graphforge-neo4j[mcp]"           # + the MCP server
+pip install "graphforge-neo4j[postgres]"      # + a database driver: postgres | mysql | mssql
+pip install "graphforge-neo4j[all]"           # everything
+cp .env.example .env                          # then set your Neo4j password in .env
 ```
 
-The import package and CLI are both `graphforge` (only the PyPI distribution name is `graphforge-neo4j`). The Neo4j driver and all three database drivers install by default, so any source works out of the box — if a driver is already installed, pip leaves it alone.
+The import package and CLI are both `graphforge` (only the PyPI distribution name is `graphforge-neo4j`).
+
+**Database drivers are extras as of 0.3.** Every driver is imported lazily behind a guard, so bundling all three only meant that someone who wanted to graph a repository still had to build `pyodbc` — which needs a system ODBC driver and is the most likely of the three to fail. Pick the engine you use, or `[all]` for the previous behaviour. If you point `graphforge db` at an engine whose driver is missing, it tells you the exact command. `[gitlab]` adds GitLab group auto-discovery, the only feature that needs an HTTP client.
 
 From source:
 

@@ -1,16 +1,17 @@
-# graphforge-neo4j runtime dependencies.
-# Easiest install:  pip install graphforge-neo4j
-# From source:      pip install -e .
-
-neo4j>=5.0.0
-python-dotenv>=1.0.0
-tqdm>=4.65.0
-requests>=2.28.0
-
-# Database drivers (bundled by default so any source works out of the box).
-mysql-connector-python>=8.0
-psycopg2-binary>=2.9
-pyodbc>=5.0            # SQL Server; also needs a system ODBC driver at run time
-
-# Optional: the MCP server (expose the graph to Claude / any MCP client)
-#   pip install "graphforge-neo4j[mcp]"
+# This file is not the source of truth. pyproject.toml is.
+#
+# It duplicated the dependency list, with nothing enforcing that the two agreed
+# -- so it could drift silently, and did not survive the move to optional
+# database drivers. Install from the project instead:
+#
+#   pip install graphforge-neo4j                 # core: git ingest, MCP-less
+#   pip install 'graphforge-neo4j[mcp]'          # + the MCP server
+#   pip install 'graphforge-neo4j[postgres]'     # + PostgreSQL   (mysql, mssql too)
+#   pip install 'graphforge-neo4j[gitlab]'       # + GitLab group auto-discovery
+#   pip install 'graphforge-neo4j[all]'          # everything
+#
+# From a source checkout:
+#
+#   pip install -e '.[dev,all]'
+#
+-e .
