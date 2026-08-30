@@ -68,6 +68,23 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- `graphforge quickstart` — guided first run: configure, connect, create the
+  schema, ingest, link, and register an MCP client.
+- `graphforge doctor` — checks the install, the connection and the graph, and
+  prints the command that fixes whatever is wrong.
+- `graphforge mcp install [--client …]` — writes the entry for Claude Code,
+  Claude Desktop and Cursor. Resolves the console script from the running
+  interpreter rather than `PATH`, and points at your `.env`, so no password is
+  written into a client config.
+- Dashboard: guided ingest, a first-run empty state, a clickable legend, a node
+  detail panel, canvas zoom/pan/drag/fit, and real node names on the canvas.
+- [SECURITY.md](SECURITY.md), and [ADR 9](docs/DESIGN.md) on the read guard.
+- `lint` and `types` are now blocking in CI; the secret scan covers GitHub, AWS,
+  Slack and private-key formats across all tracked files, not `glpat-` in three
+  file types; coverage has a floor (70%, measured baseline 79%).
+- Tests for `git/clone.py` and `git/discover.py`, which had none, and for
+  `cmd_status` / `cmd_verify`.
+
 - Layered read-query gate (`graphforge.query_guard`): procedure allowlist, clause
   denies, limit cap; Neo4j read transactions for anything that still runs.
 - [docs/FEATURE_AUDIT.md](docs/FEATURE_AUDIT.md) — README / BUILD_PLAN / code / tests.
@@ -290,9 +307,10 @@ All notable changes to this project are documented here. The format is based on
 - The `lint`, `types` and `integration` CI jobs are non-blocking on purpose —
   their configuration was authored without a ruff/mypy/docker binary available
   to verify it. Flipping them to blocking is tracked as a good first issue in
-  `CONTRIBUTING.md`.
+  `CONTRIBUTING.md`. *(lint and types became blocking in 0.3.0.)*
 - No dashboard screenshot is committed yet: capturing one needs a real browser
-  against a real graph. `docs/img/README.md` has the recipe.
+  against a real graph. `docs/img/README.md` has the recipe. *(Committed in
+  0.3.0.)*
 
 ## [0.1.0]
 

@@ -126,26 +126,20 @@ jobs:
           retention-days: 14
 
   # ---------------------------------------------------------------------------
-  # Lint.
+  # Lint. BLOCKING.
   #
-  # NON-BLOCKING ON PURPOSE. [tool.ruff.lint].select in pyproject.toml was
-  # authored offline, without a ruff binary available to run it, so the rule set
-  # is an educated guess based on a static survey of the tree rather than a
-  # verified-clean configuration.
+  # This was non-blocking while the rule set in pyproject.toml had never been
+  # run against the tree. It has been now, and `ruff check src tests` is clean,
+  # so a new violation should fail the build rather than scroll past.
   #
-  # TO MAKE THIS BLOCKING: read the first run's output, trim `select` / extend
-  # `ignore` in pyproject.toml until `ruff check src tests` is clean, then delete
-  # the `continue-on-error: true` line below.
-  #
-  # `ruff format --diff` is informational only: the tree has never been
-  # formatted, so it will report a large diff on the first run. Do the
-  # reformat as its own isolated commit before turning this into `--check`.
+  # `ruff format --diff` stays informational: the tree has never been formatted,
+  # so it reports a large diff. Do that reformat as its own isolated commit
+  # before turning it into `--check`.
   # ---------------------------------------------------------------------------
   lint:
-    name: lint (ruff, non-blocking)
+    name: lint (ruff)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -161,21 +155,15 @@ jobs:
         run: ruff format --diff src tests
 
   # ---------------------------------------------------------------------------
-  # Type checking.
+  # Type checking. BLOCKING.
   #
-  # NON-BLOCKING ON PURPOSE. [tool.mypy] in pyproject.toml has never been
-  # executed against this tree; the settings are lenient but the baseline error
-  # count is unknown.
-  #
-  # TO MAKE THIS BLOCKING: get the run to zero errors (fix, or add targeted
-  # `# type: ignore[code]` / per-module overrides), then delete the
-  # `continue-on-error: true` line below.
+  # This was non-blocking while [tool.mypy] had never been executed against the
+  # tree and the baseline was unknown. The baseline is zero, so keep it there.
   # ---------------------------------------------------------------------------
   types:
-    name: types (mypy, non-blocking)
+    name: types (mypy)
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -272,15 +260,53 @@ jobs:
         run: docker compose -f docker-compose.ci.yml down -v
 
   # ---------------------------------------------------------------------------
+  # Secret scan.
+  #
+  # This used to match `glpat-` only, across .py/.json/.md only -- so a GitHub
+  # token, an AWS key or a private key committed in a workflow, a shell script
+  # or a .env would all have sailed through. It now scans the tracked tree and
+  # checks the credential formats this project actually comes into contact with.
+  #
+  # It is a backstop, not a guarantee: it catches recognisable formats, not a
+  # password in a config file. .gitignore is what keeps .env out of the repo.
+  # ---------------------------------------------------------------------------
   secret-scan:
     name: secret scan
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Fail on obvious secrets
+      - name: Fail on recognisable credentials
         run: |
-          if grep -rEn "glpat-[A-Za-z0-9_-]{20}" --include="*.py" --include="*.json" --include="*.md" .; then
-            echo "::error::GitLab token found"; exit 1
+          set -uo pipefail
+          # Scan tracked files only, and never this workflow (it contains the
+          # patterns themselves).
+          mapfile -t FILES < <(git ls-files | grep -v '^\.github/workflows/ci\.yml$')
+          fail=0
+          check() {
+            if grep -nE "$2" "${FILES[@]}" 2>/dev/null; then
+              echo "::error::$1 found"; fail=1
+            fi
+          }
+          check "GitLab token"          'glpat-[A-Za-z0-9_-]{20}'
+          check "GitHub token"          '(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36}'
+          check "GitHub fine-grained token" 'github_pat_[A-Za-z0-9_]{50,}'
+          check "AWS access key id"     'AKIA[0-9A-Z]{16}'
+          check "Slack token"           'xox[baprs]-[A-Za-z0-9-]{10,}'
+          check "Private key block"     'BEGIN (RSA |EC |OPENSSH |PGP )?PRIVATE KEY'
+          # No `NEO4J_PASSWORD=` pattern here: it matches .env.example, the
+          # README, CONNECT.md and integration_test.sh, all of which are
+          # supposed to contain placeholders. The tracked-.env check below is
+          # the precise form of that question.
+          if [ "$fail" -ne 0 ]; then
+            echo "Rotate the credential, then remove it from the tree and from history."
+            exit 1
           fi
-          echo "No obvious secrets found."
+          echo "No recognisable credentials in tracked files."
+      - name: Confirm .env is ignored, not merely absent
+        run: |
+          if git ls-files --error-unmatch .env >/dev/null 2>&1; then
+            echo "::error::.env is tracked"; exit 1
+          fi
+          git check-ignore -q .env || { echo "::error::.env is not gitignored"; exit 1; }
+          echo ".env is gitignored and untracked."

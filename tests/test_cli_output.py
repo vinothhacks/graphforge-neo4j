@@ -155,3 +155,72 @@ def test_all_extra_restores_every_optional_dependency():
             everything.update(pins)
     assert everything <= set(extras["all"]), \
         f"[all] is missing: {everything - set(extras['all'])}"
+
+
+# ------------------------------------------------- status / verify commands --
+class _FakeWriter:
+    """Stands in for Neo4jWriter as a context manager over canned results."""
+
+    def __init__(self, counts=None, repos=None):
+        self._counts = counts if counts is not None else {}
+        self._repos = repos if repos is not None else []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def label_counts(self):
+        return self._counts
+
+    def repository_status(self):
+        return self._repos
+
+
+def _run(monkeypatch, command, writer):
+    from graphforge import cli
+    from graphforge.core.config import DbSettings, Neo4jSettings, Settings
+
+    settings = Settings(neo4j=Neo4jSettings(password="pw"), db=DbSettings())
+    monkeypatch.setattr(cli, "Neo4jWriter", lambda *a, **k: writer)
+    monkeypatch.setattr(cli, "_settings", lambda _args: settings)
+    return getattr(cli, command)(build_parser().parse_args([command.removeprefix("cmd_")]))
+
+
+def test_verify_reports_counts_highest_first(monkeypatch, capsys):
+    code = _run(monkeypatch, "cmd_verify",
+                _FakeWriter(counts={"Method": 721, "Class": 280, "File": 114}))
+    out = capsys.readouterr().out
+    assert code == 0
+    order = [out.index(label) for label in ("Method", "Class", "File")]
+    assert order == sorted(order), "labels were not ordered by count"
+    assert "721" in out
+
+
+def test_verify_on_an_empty_graph_says_so_instead_of_printing_nothing(monkeypatch, capsys):
+    code = _run(monkeypatch, "cmd_verify", _FakeWriter(counts={}))
+    out = capsys.readouterr().out
+    assert code == 0
+    assert "no nodes found" in out
+    assert "empty" in out
+
+
+def test_status_prints_an_aligned_table(monkeypatch, capsys):
+    rows = [
+        {"name": "short", "status": "completed", "files": 7, "commits": 2,
+         "lastIngestedAt": "2026-08-30T17:04:21+00:00"},
+        {"name": "a-considerably-longer-repository-name", "status": "ingesting",
+         "files": 12345, "commits": 678, "lastIngestedAt": "2026-08-30T17:05:00+00:00"},
+    ]
+    code = _run(monkeypatch, "cmd_status", _FakeWriter(repos=rows))
+    header, first, second = capsys.readouterr().out.rstrip("\n").split("\n")
+    assert code == 0
+    assert header.index("lastIngestedAt") == first.index("2026") == second.index("2026"), \
+        "a long repository name pushed the timestamp column out of line"
+
+
+def test_status_with_nothing_ingested_says_so(monkeypatch, capsys):
+    code = _run(monkeypatch, "cmd_status", _FakeWriter(repos=[]))
+    assert code == 0
+    assert "no repositories ingested yet" in capsys.readouterr().out

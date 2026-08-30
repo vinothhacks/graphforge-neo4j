@@ -82,22 +82,19 @@ Keep it regex/line-based — see ADR 3 in `docs/DESIGN.md` for why. A parser tha
 returns partial structure for a file that does not compile is doing its job; one
 that raises takes the whole scan with it.
 
-### 2. Flip a non-blocking CI job to blocking
+### 2. Flip the last non-blocking CI job to blocking
 
-Three jobs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) run with
-`continue-on-error: true` because their configuration was written without the
-tool available to verify it. Each carries a comment naming exactly what has to
-happen first. Doing any one of them is a complete contribution:
+One job in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) still runs
+with `continue-on-error: true`, because its configuration has not been verified
+end to end. Making it blocking is a complete contribution:
 
-- **`lint` (ruff).** `[tool.ruff.lint].select` in `pyproject.toml` was chosen
-  from a static survey, not a real run. Read the first run's annotations, then
-  either fix the code or extend `ignore` with a *reason comment* — the existing
-  entries all have one, and a new one without it will be asked for in review.
-  Separately, `ruff format` has never been run over this tree, so the first
-  reformat must land as its own isolated commit with no behaviour change in it.
-- **`types` (mypy).** `[tool.mypy]` is lenient but has never been executed; the
-  baseline error count is unknown. Get it to zero with real fixes or targeted
-  `# type: ignore[code]` / per-module overrides.
+- **`lint` (ruff) and `types` (mypy) are now blocking.** Both were advisory
+  while their configuration had never been run against the tree; both are now
+  clean and enforced. If a rule turns out to be more noise than signal, move it
+  to `ignore` with a *reason comment* — the existing entries all have one, and a
+  new one without it will be asked for in review. `ruff format` has still never
+  been run over this tree, so that reformat must land as its own isolated commit
+  with no behaviour change in it.
 - **`integration`.** `scripts/integration_test.sh` was authored with no docker
   and no network. Its shell, embedded Python and Java fixture were validated
   statically, but a green run is unproven. Dispatch it manually
@@ -106,10 +103,10 @@ happen first. Doing any one of them is a complete contribution:
 In every case the change is the same one line: delete `continue-on-error: true`.
 Getting there is the work.
 
-### 3. Capture the dashboard screenshot
+### 3. Keep the dashboard screenshots current
 
-`docs/img/dashboard.png` does not exist, so the README describes the dashboard
-instead of showing it. Capturing one needs a browser and a populated graph —
+`docs/img/dashboard.png` and `docs/img/dashboard-empty.png` are committed and
+embedded in the README. If you change the dashboard's layout, retake them —
 about ten minutes with the playground compose stack.
 
 [`docs/img/README.md`](docs/img/README.md) has the full recipe: what to ingest

@@ -335,6 +335,45 @@ it cannot read `lastCommit` when there is no connection.
 
 ---
 
+### ADR 9: The read guard is a tokenizer, not a keyword search
+
+**Decision.** `graphforge.query_guard` decides whether a query may run, by
+masking everything the user controls as *data* and then reasoning about what is
+left. Strings, comments and backtick-quoted identifiers are blanked; the
+remaining text is checked for write clauses, for `LOAD CSV` / `USE` / `SHOW`, for
+multiple statements, and for a `LIMIT` above the cap. Procedures are
+**deny-by-default**: every `CALL` site must resolve to a name on a three-entry
+allowlist, and a target that cannot be resolved is a denial. The caller then runs
+the query inside a Neo4j read transaction with a timeout, so even a defeated
+guard cannot write.
+
+One implementation, two callers: the MCP `read_cypher` tool and the dashboard's
+`POST /api/query`. Both reject before opening a connection, and the test corpus
+(`MUST_REJECT` / `MUST_ALLOW`) is shared by the offline tests, the live-HTTP e2e
+suite and the live-MCP e2e suite.
+
+**Why.** This replaced a single regex over the raw query text. That approach is
+wrong in both directions at once: it rejects `n.name = 'CREATE'` and `:Create`,
+which are ordinary reads, while a keyword it does not happen to list sails
+through. Masking-then-checking removes the false positives by construction, and
+deny-by-default removes the false negatives — you cannot forget to list a
+dangerous procedure if nothing is allowed unless it is listed.
+
+**Cost, and what it got wrong.** The masker has to understand Cypher's quoting
+well enough to be trusted, and the first version did not: it handled `'`, `"`,
+`//` and `/* */` but not backticks. So ``CALL `apoc.util.sleep`(1000) `` matched
+no bare-identifier pattern, the allowlist was never consulted, and the query ran
+— while ``MATCH (n:`Pending DELETE`) RETURN n``, a plain read, was refused. Both
+directions of the same omission.
+
+The lesson is in the shape of the fix. Adding backticks to the masker alone would
+have closed the visible hole and left the real one: a `CALL` the parser could not
+read was *not checked at all*. Deny-by-default over every `CALL` site is what
+makes the next unparseable form fail closed instead of open. A guard that only
+inspects what it can parse is not deny-by-default, whatever its allowlist says.
+
+---
+
 ## What's implemented
 
 - **Git**: structure + full history; four language parsers (Java, Python,
@@ -352,7 +391,7 @@ it cannot read `lastCommit` when there is no connection.
 - **Orchestration**: `--replace` (prune-then-reingest), continue-on-error
   ingestion, per-repository status, `graphforge status`, `--since` GitLab
   discovery.
-- **MCP**: eleven read-only tools, three of them paged, with a TTL-cached
+- **MCP**: twelve read-only tools, three of them paged, with a TTL-cached
   `get_schema`.
 - **Dashboard**: graph canvas, Cypher console, label explorer, search, themes,
   keyboard shortcuts, over seven read-only endpoints.
@@ -373,7 +412,6 @@ it cannot read `lastCommit` when there is no connection.
   `--since-commit` does for git.
 - Optional quality/coverage overlays attached to `:File` / `:Class` nodes.
 - Multi-database topologies (per-domain graphs, per-domain MCP aliases).
-- A captured dashboard screenshot for the README — see `docs/img/README.md`.
 
 ## Known limitations
 

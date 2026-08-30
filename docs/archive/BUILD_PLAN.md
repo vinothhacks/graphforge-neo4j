@@ -1,3 +1,10 @@
+> **Archived, and superseded.** This was the original hand-off specification.
+> It is kept for the reasoning it records, not as a description of the project.
+> Where it disagrees with the code, the code is right —
+> [docs/FEATURE_AUDIT.md](../FEATURE_AUDIT.md) is the four-way diff, and
+> Workstream B (a React dashboard) was decided against: the vanilla single-file
+> dashboard is the product. See [ADR 2](../DESIGN.md).
+
 # graphforge — Build Plan for Opus Subagents
 
 > **Audience:** This document is a hand-off spec for Opus subagents to implement.

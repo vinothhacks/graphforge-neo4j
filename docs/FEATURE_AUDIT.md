@@ -1,8 +1,12 @@
 # Feature audit
 
-Four-way diff of what README claims, what [`BUILD_PLAN.md`](../BUILD_PLAN.md) promised, what `src/graphforge` does, and whether a test names the behaviour. Status values: `SHIPPED_TESTED` (test id named) / `SHIPPED_UNTESTED` / `PARTIAL` / `MISSING` / `DOC_ONLY` / `FIXTURE_ONLY`.
+Four-way diff of what README claims, what [`BUILD_PLAN.md`](archive/BUILD_PLAN.md) promised, what `src/graphforge` does, and whether a test names the behaviour. Status values: `SHIPPED_TESTED` (test id named) / `SHIPPED_UNTESTED` / `PARTIAL` / `MISSING` / `DOC_ONLY` / `FIXTURE_ONLY`.
 
-Code wins over README. Numbers: **10** CLI commands, **12** MCP tools.
+Updated in 0.3.0: `git/clone.py` and `git/discover.py`, previously untested,
+are covered by `tests/test_git_credentials.py` and `tests/test_gitlab_discovery.py`.
+Measured coverage over the offline suite is 79%.
+
+Code wins over README. Numbers: **12** CLI commands, **12** MCP tools.
 
 ## VDS (first target)
 
@@ -23,8 +27,8 @@ There is no extra CLI flag for catalog table names; they live on `VdsConfig` def
 | `db` | yes | yes | `cmd_db` | `test_db_mapping.py`, `test_url_and_discovery.py`, `test_db_sampling.py` | `SHIPPED_TESTED` |
 | `vds` | yes (now accurate) | yes | `cmd_vds` | mapping only | `PARTIAL` |
 | `link` | yes | yes | `cmd_link` | `test_link_tokens.py`, `test_link_passes_render` | `SHIPPED_TESTED` |
-| `status` | yes | yes | `cmd_status` | none (CLI) | `SHIPPED_UNTESTED` |
-| `verify` | yes | yes | `cmd_verify` | none (CLI) | `SHIPPED_UNTESTED` |
+| `status` | yes | yes | `cmd_status` | `test_cli_output.py::test_status_prints_an_aligned_table` | `SHIPPED_TESTED` |
+| `verify` | yes | yes | `cmd_verify` | `test_cli_output.py::test_verify_reports_counts_highest_first` | `SHIPPED_TESTED` |
 | `search` | yes | no (post-plan) | `cmd_search` | `test_cli_search.py` | `SHIPPED_TESTED` |
 | `ui` | yes | yes | `cmd_ui` | `test_ui.py`, `test_ui_api.py` | `SHIPPED_TESTED` |
 | `mcp` | yes | yes | `cmd_mcp` | `test_build_server_registers_every_documented_tool` | `SHIPPED_TESTED` |
@@ -132,5 +136,5 @@ Browser UI: Playwright MCP runbook `docs/DASHBOARD_E2E.md` (agent pass).
 | Promise | Status |
 |---------|--------|
 | Workstream B React dashboard / `--react` | `MISSING` (vanilla is the product) |
-| Workstream A drop entire ruff ignore list | `PARTIAL` (lint is green; some ignores remain) |
-| Dashboard screenshot `docs/img/dashboard.png` | `SHIPPED_TESTED` (`docs/DASHBOARD_E2E.md#dashboard-screenshot`) |
+| Workstream A drop entire ruff ignore list | `PARTIAL` (lint is green and now blocking in CI; some ignores remain, each with a reason) |
+| Dashboard screenshot `docs/img/dashboard.png` | `SHIPPED_TESTED` (`docs/DASHBOARD_E2E.md`; plus `dashboard-empty.png` for the first-run state) |
