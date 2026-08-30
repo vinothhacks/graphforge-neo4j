@@ -128,6 +128,7 @@ class GraphQuery:
 
     @classmethod
     def connect(cls, settings: Neo4jSettings) -> GraphQuery:
+        settings.check_connectable()
         from neo4j import GraphDatabase
 
         driver = GraphDatabase.driver(settings.uri, auth=(settings.user, settings.password))

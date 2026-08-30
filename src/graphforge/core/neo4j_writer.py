@@ -59,6 +59,7 @@ class Neo4jWriter:
 
     def _driver_connect(self):
         if self._driver is None:
+            self.settings.check_connectable()
             from neo4j import GraphDatabase  # lazy import
 
             self._driver = GraphDatabase.driver(

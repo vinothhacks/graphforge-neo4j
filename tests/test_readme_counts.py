@@ -19,8 +19,9 @@ def test_readme_command_count():
     names = set(sub.choices)
     assert names == {
         "init", "git", "db", "vds", "link", "status", "verify", "search", "ui", "mcp",
+        "doctor", "quickstart",
     }
-    assert len(names) == 10
+    assert len(names) == 12
 
 
 def test_readme_mcp_tool_count():

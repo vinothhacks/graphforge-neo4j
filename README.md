@@ -76,6 +76,21 @@ Requires **Python 3.10+** and the `git` CLI. SQL Server additionally needs a sys
 
 ## Quickstart
 
+One command does the whole sequence below — it asks for anything it needs, checks
+each step before the next, and wires up an MCP client at the end:
+
+```bash
+graphforge quickstart
+```
+
+If anything goes wrong, at any point:
+
+```bash
+graphforge doctor        # what's broken, and the command that fixes it
+```
+
+The individual steps, if you'd rather drive them yourself:
+
 ```bash
 graphforge init                                   # create constraints + indexes
 
@@ -131,6 +146,8 @@ graphforge git /path/to/repo --dry-run            # just count the operations
 
 | Command | What it does |
 |---------|--------------|
+| `graphforge quickstart` | Guided first run: configure, connect, create the schema, ingest a repo and/or database, link them, and wire up an MCP client. `--yes` for a non-interactive run. |
+| `graphforge doctor` | Check the install, the connection, and the graph, and print the exact command to fix whatever is wrong. Start here when something breaks. |
 | `graphforge init` | Create the graph's constraints and indexes. |
 | `graphforge git [PATHS/URLS…]` | Ingest repositories: code structure + commit history. |
 | `graphforge db` | Ingest relational schemas (MySQL / PostgreSQL / SQL Server). |
@@ -141,6 +158,7 @@ graphforge git /path/to/repo --dry-run            # just count the operations
 | `graphforge search QUERY` | Case-insensitive search of File/Class/Method (`--kind code`, the default), Table/Column/StoredProcedure (`schema`), or both (`all`). Optional `--repo NAME`. |
 | `graphforge ui` | Serve the local web dashboard (graph canvas, Cypher console, masked config + live load status). |
 | `graphforge mcp` | Serve the graph over MCP (stdio). |
+| `graphforge mcp install` | Register graphforge with Claude Code / Claude Desktop / Cursor. Resolves the console script from the running interpreter and points at your `.env`, so no password is ever written into a client config. `--dry-run` to preview, `--remove` to undo. |
 
 Flags shared by the ingest commands (`init`, `git`, `db`, `vds`, `link`): `--emit FILE`, `--dry-run`, `--no-schema`, and Neo4j overrides `--neo4j-uri/-user/-password/-database`, plus `--env FILE` to load a specific `.env`. `--replace` is `git` and `db` only. Run any command with `--help` for its full list.
 

@@ -54,6 +54,23 @@ class Neo4jSettings:
             include_lines=_bool(os.getenv("GF_INCLUDE_LINES"), cls.include_lines),
         )
 
+    def check_connectable(self) -> None:
+        """Fail with advice *before* connecting, rather than as a driver traceback.
+
+        Called only from the two places that actually open a driver, so
+        ``--emit`` and ``--dry-run`` still need no configuration at all.
+        """
+        if self.password:
+            return
+        if _bool(os.getenv("GF_ALLOW_EMPTY_PASSWORD"), False):
+            return  # a server started with NEO4J_AUTH=none
+        raise ValueError(
+            "NEO4J_PASSWORD is not set.\n"
+            "  copy .env.example to .env and fill it in, or pass --neo4j-password.\n"
+            "  if your server runs with auth disabled, set GF_ALLOW_EMPTY_PASSWORD=true.\n"
+            "  `graphforge doctor` will tell you which of these applies."
+        )
+
 
 @dataclass
 class GitSettings:

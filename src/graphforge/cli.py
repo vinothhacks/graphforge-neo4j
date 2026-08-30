@@ -14,10 +14,13 @@ import json
 import logging
 import os
 import sys
+from pathlib import Path
 
 from . import __version__
 from .core.config import Settings, load_settings
 from .core.neo4j_writer import Neo4jWriter, load_schema
+
+log = logging.getLogger("graphforge.cli")
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -37,7 +40,13 @@ def _add_writer_opts(p: argparse.ArgumentParser) -> None:
                    help="skip creating constraints/indexes before ingesting")
 
 
+#: The settings the current command resolved, so the top-level error handler can
+#: name the URI and database a failure was actually about. Set by :func:`_settings`.
+_RESOLVED: Settings | None = None
+
+
 def _settings(args) -> Settings:
+    global _RESOLVED
     s = load_settings(getattr(args, "env", None))
     if getattr(args, "neo4j_uri", None):
         s.neo4j.uri = args.neo4j_uri
@@ -47,7 +56,41 @@ def _settings(args) -> Settings:
         s.neo4j.password = args.neo4j_password
     if getattr(args, "neo4j_database", None):
         s.neo4j.database = args.neo4j_database
+    _RESOLVED = s
     return s
+
+
+def neo4j_advice(exc: BaseException, settings: Settings | None = None) -> str | None:
+    """Turn a Neo4j driver exception into one actionable line.
+
+    Returns ``None`` for anything that is not a driver error, so the caller can
+    re-raise. The driver is never imported here: every ``neo4j.exceptions`` type
+    descends from ``Exception`` rather than from anything we already catch, and
+    importing to find that out would defeat ``--emit`` / ``--dry-run`` staying
+    driver-free.
+    """
+    if not (type(exc).__module__ or "").startswith("neo4j"):
+        return None
+    name = type(exc).__name__
+    detail = str(exc).strip().splitlines()[0] if str(exc).strip() else name
+    neo = settings.neo4j if settings else None
+    uri = neo.uri if neo else "the configured URI"
+
+    if name in {"ServiceUnavailable", "SessionExpired"} or "Couldn't connect" in detail:
+        return (f"cannot reach Neo4j at {uri}\n"
+                "  start one with `docker compose up -d`, or point --neo4j-uri elsewhere")
+    if name == "AuthError" or "authentication failure" in detail.lower():
+        user = neo.user if neo else "neo4j"
+        return (f"Neo4j rejected the credentials for user {user!r}\n"
+                "  set NEO4J_PASSWORD in your .env, or pass --neo4j-password")
+    if "database does not exist" in detail.lower() or (
+            name == "ClientError" and "DatabaseNotFound" in detail):
+        db = neo.database if neo else "the configured database"
+        return (f"Neo4j has no database named {db!r}\n"
+                "  Community Edition only ever has 'neo4j' - check NEO4J_DATABASE")
+    if name == "ConfigurationError":
+        return f"Neo4j connection is misconfigured: {detail}\n  check NEO4J_URI ({uri})."
+    return f"Neo4j error ({name}): {detail}"
 
 
 def _writer(s: Settings, args) -> Neo4jWriter:
@@ -271,8 +314,48 @@ def cmd_ui(args) -> int:
     from .ui import serve
 
     s = _settings(args)
-    serve(s, host=args.host, port=args.port)
+    try:
+        serve(s, host=args.host, port=args.port)
+    except OSError as exc:
+        if getattr(exc, "errno", None) in (48, 98, 10048):  # EADDRINUSE, incl. WSAEADDRINUSE
+            raise RuntimeError(
+                f"port {args.port} is already in use — "
+                f"try `graphforge ui --port {args.port + 1}`") from exc
+        raise
     return 0
+
+
+def cmd_doctor(args) -> int:
+    from .onboarding import report, run_checks
+
+    checks = run_checks(_settings(args), getattr(args, "env", None))
+    return report(checks)
+
+
+def cmd_quickstart(args) -> int:
+    from .onboarding import quickstart
+
+    return quickstart(args)
+
+
+def cmd_mcp_install(args) -> int:
+    from .mcp.install import install, uninstall
+
+    clients = [args.client] if args.client else None
+    if args.remove:
+        lines = uninstall(clients)
+    else:
+        env_file = Path(args.env).resolve() if args.env else _default_env_file()
+        lines = install(clients, env_file, dry_run=args.dry_run)
+    for line in lines:
+        print(line)
+    return 0
+
+
+def _default_env_file() -> Path | None:
+    """The .env to point the MCP entry at, so no password lands in a client config."""
+    candidate = Path.cwd() / ".env"
+    return candidate if candidate.exists() else None
 
 
 def cmd_mcp(args) -> int:
@@ -413,8 +496,36 @@ def build_parser() -> argparse.ArgumentParser:
     p_ui.set_defaults(func=cmd_ui)
 
     p_mcp = sub.add_parser("mcp", help="serve the knowledge graph over MCP (stdio)")
+    mcp_sub = p_mcp.add_subparsers(dest="mcp_command")
+    p_mcp_install = mcp_sub.add_parser(
+        "install", help="register graphforge with an MCP client (no password is written)")
+    p_mcp_install.add_argument(
+        "--client", choices=["claude-code", "claude-desktop", "cursor", "all"],
+        help="which client to write to (default: every client we know about)")
+    p_mcp_install.add_argument("--remove", action="store_true",
+                               help="remove the entry instead of adding it")
+    p_mcp_install.add_argument("--dry-run", action="store_true",
+                               help="print what would be written and exit")
+    _add_common(p_mcp_install)
+    p_mcp_install.set_defaults(func=cmd_mcp_install)
     _add_common(p_mcp)
     p_mcp.set_defaults(func=cmd_mcp)
+
+    p_doctor = sub.add_parser(
+        "doctor", help="check the install, the connection, and the graph, and say how to fix it")
+    _add_common(p_doctor)
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    p_quick = sub.add_parser(
+        "quickstart", help="guided first run: configure, connect, ingest, and wire up MCP")
+    p_quick.add_argument("--yes", action="store_true",
+                         help="take defaults and never prompt (for scripts and CI)")
+    p_quick.add_argument("--repo", metavar="PATH|URL", default="",
+                         help="repository to ingest, instead of being asked")
+    p_quick.add_argument("--db-url", dest="db_url", metavar="URL", default="",
+                         help="database URL to ingest, instead of being asked")
+    _add_common(p_quick)
+    p_quick.set_defaults(func=cmd_quickstart)
 
     p_search = sub.add_parser("search", help="search code and/or schema nodes in the graph")
     p_search.add_argument("query", nargs="?", default="",
@@ -443,6 +554,25 @@ def main(argv: list[str] | None = None) -> int:
         # Expected, user-facing failures (bad engine, missing driver, missing
         # config file) exit cleanly instead of dumping a traceback.
         print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except KeyboardInterrupt:
+        print("\ninterrupted", file=sys.stderr)
+        return 130
+    except OSError as exc:
+        # Port already in use, unreadable path, no route to host.
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    except Exception as exc:  # noqa: BLE001 — driver errors are user errors, not crashes
+        advice = neo4j_advice(exc, _RESOLVED)
+        if advice is None:
+            raise
+        # Every neo4j.exceptions type descends from Exception, so none of them
+        # were caught above: an unreachable database used to print 35 lines of
+        # driver internals and exit 1 instead of the documented 2.
+        print(f"error: {advice}", file=sys.stderr)
+        print("  run `graphforge doctor` for a full check.", file=sys.stderr)
+        if args.verbose:
+            log.exception("underlying driver error")
         return 2
 
 
