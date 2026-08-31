@@ -44,6 +44,14 @@ _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _HAS_LIMIT = re.compile(r"\bLIMIT\b", re.IGNORECASE)
 _HAS_RETURN = re.compile(r"\bRETURN\b", re.IGNORECASE)
 
+#: Paging with SKIP/LIMIT and no ORDER BY is unsound: Neo4j guarantees no order
+#: between two queries, so the same row can appear on two pages while another is
+#: never returned at all. Every paged query orders by the node's deterministic
+#: id, which is unique and indexed, with elementId as a tiebreak for anything
+#: that somehow lacks one. (`id()` would do, but is deprecated in Neo4j 5 and
+#: warns on every query.)
+_PAGE_ORDER = "ORDER BY n.id, elementId(n) "
+
 #: Default lifetime of a cached ``get_schema`` snapshot, in seconds.
 DEFAULT_SCHEMA_TTL = 60.0
 
@@ -256,7 +264,7 @@ class GraphQuery:
             raise ValueError("label and prop must be simple identifiers")
         cypher = (
             f"MATCH (n:`{label}`) WHERE toString(n.`{prop}`) CONTAINS $value "
-            "RETURN n SKIP $offset LIMIT $limit"
+            "RETURN n " + _PAGE_ORDER + "SKIP $offset LIMIT $limit"
         )
         return self._read(cypher, {"value": value, "limit": _clamp_limit(limit),
                                    "offset": _clamp_offset(offset)})
@@ -296,10 +304,16 @@ class GraphQuery:
     _FIND_CODE_WHERE = "MATCH (n) WHERE " + _CODE_PRED + " "
     _FIND_SCHEMA_WHERE = "MATCH (n) WHERE " + _SCHEMA_PRED + " "
     _SEARCH_KINDS = frozenset({"code", "schema", "all"})
+    #: `ref` is what tells two same-named hits apart. A Method carries neither
+    #: `fqn` nor `path` -- its qualifier is `owner`, the declaring class -- and a
+    #: free function has an empty `owner`, which coalesce does not skip. Without
+    #: the full chain every `apply_schema`, and then every module-level `main`,
+    #: rendered as the same row. `n.id` is the last resort and is always unique.
     _SEARCH_RETURN: ClassVar[dict[str, str]] = {
         "code": (
             "RETURN labels(n) AS labels, n.name AS name, "
-            "coalesce(n.fqn, n.path) AS ref, n.repo AS repo "
+            "coalesce(n.fqn, n.path, CASE WHEN coalesce(n.owner, '') <> '' THEN n.owner END, n.id) AS ref, "
+            "n.repo AS repo "
         ),
         "schema": (
             "RETURN labels(n) AS labels, n.name AS name, "
@@ -307,7 +321,8 @@ class GraphQuery:
         ),
         "all": (
             "RETURN labels(n) AS labels, n.name AS name, "
-            "coalesce(n.fqn, n.path) AS ref, n.repo AS repo, "
+            "coalesce(n.fqn, n.path, CASE WHEN coalesce(n.owner, '') <> '' THEN n.owner END, n.id) AS ref, "
+            "n.repo AS repo, "
             "n.database AS database, n.table AS table "
         ),
     }
@@ -341,7 +356,8 @@ class GraphQuery:
         if repo:
             params["repo"] = repo
         rows = self._read(
-            where + self._SEARCH_RETURN[kind] + "SKIP $offset LIMIT $limit", params)
+            where + self._SEARCH_RETURN[kind] + _PAGE_ORDER + "SKIP $offset LIMIT $limit",
+            params)
         count_params: dict[str, Any] = {"t": text}
         if repo:
             count_params["repo"] = repo
@@ -362,7 +378,7 @@ class GraphQuery:
         cypher = (
             self._FIND_TABLE_WHERE +
             "RETURN labels(n) AS labels, n.name AS name, n.table AS table, n.database AS database "
-            "SKIP $offset LIMIT $limit"
+            + _PAGE_ORDER + "SKIP $offset LIMIT $limit"
         )
         return self._read(cypher, {"t": text, "limit": _clamp_limit(limit),
                                    "offset": _clamp_offset(offset)})
@@ -698,6 +714,19 @@ class LazyGraph:
     """
 
     def __init__(self, settings: Neo4jSettings):
+        # Import the driver now; connect later. These two halves look alike and
+        # are not: the import is cheap and cannot fail for any reason the user
+        # can act on, while the connection is slow and fails whenever the
+        # database is down. Only the second is worth deferring.
+        #
+        # Deferring both deadlocks. The first `import neo4j` executed from
+        # inside a *running* MCP server never returns -- the tool call hangs
+        # forever rather than erroring, which is worse than the eager connect
+        # this replaced. Reproduced on Windows/CPython 3.11 with mcp 1.x; moving
+        # the connect to a worker thread does not help, and pre-importing here
+        # fixes it completely.
+        import neo4j  # noqa: F401  — see above; must not be moved into connect()
+
         self._settings = settings
         self._graph: GraphQuery | None = None
 

@@ -224,3 +224,36 @@ def test_the_command_is_resolved_not_guessed():
     command = clients.default_command()
     assert command, "no command resolved"
     assert "graphforge" in Path(command).name
+
+
+def test_the_driver_is_imported_when_the_lazy_graph_is_built_not_when_it_connects():
+    """Deferring the *import* as well as the connection deadlocks the MCP server.
+
+    The first `import neo4j` executed inside a running MCP server never returns:
+    the tool call hangs forever instead of erroring, which is strictly worse than
+    the eager connect that lazy connection replaced. The import is cheap and
+    cannot fail for anything the user can act on, so it belongs at build time;
+    only the connection is worth deferring.
+
+    Run in a subprocess because `neo4j` is already imported in this one.
+    """
+    import subprocess
+    import sys
+    import textwrap
+
+    script = textwrap.dedent("""
+        import sys
+        assert "neo4j" not in sys.modules, "precondition: neo4j already imported"
+
+        from graphforge.core.config import Neo4jSettings
+        from graphforge.mcp.server import LazyGraph
+        assert "neo4j" not in sys.modules, "importing the module should not import the driver"
+
+        graph = LazyGraph(Neo4jSettings(password="pw"))
+        assert "neo4j" in sys.modules, "the driver must be imported when LazyGraph is built"
+        assert graph._graph is None, "building it must not open a connection"
+        print("OK")
+    """)
+    done = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "OK" in done.stdout
