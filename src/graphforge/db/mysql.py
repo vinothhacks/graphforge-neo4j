@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import ClassVar
 
+from ..core.errors import MissingExtra
 from .base import SchemaExtractor
 
 
@@ -18,7 +19,7 @@ class MySQLExtractor(SchemaExtractor):
         try:
             import mysql.connector
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
+            raise MissingExtra(
                 "MySQL support is not installed. Run: pip install 'graphforge-neo4j[mysql]'"
             ) from exc
         kwargs = {

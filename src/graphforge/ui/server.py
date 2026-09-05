@@ -29,7 +29,7 @@ import logging
 import secrets
 from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from pathlib import Path
+from importlib import resources
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -534,7 +534,8 @@ def route(
 # http plumbing
 # --------------------------------------------------------------------------
 def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: bool = True):
-    html = (Path(__file__).parent / "dashboard.html").read_text(encoding="utf-8")
+    # importlib.resources, not __file__: see load_schema() for why.
+    html = resources.files("graphforge.ui").joinpath("dashboard.html").read_text(encoding="utf-8")
     loopback_bind = is_loopback_host(bind_host)
 
     # Ingest exists only on a loopback bind. The token is minted per run and

@@ -11,6 +11,20 @@ from __future__ import annotations
 from typing import Any
 
 
+class MissingExtra(RuntimeError):
+    """A required optional dependency is not installed.
+
+    Deliberately distinct from a per-item failure. `graphforge db` skips one bad
+    database so a single bad credential cannot abort a ten-database run — but a
+    missing driver is categorical, not per-item: it will fail every database on
+    that engine. Swallowed as an item failure it exited 0, reported "0 tables"
+    as success, and hid the `pip install` line behind `-v`.
+
+    Subclasses RuntimeError so the CLI's existing handler still turns it into
+    `error: ...` and exit 2 with no traceback.
+    """
+
+
 def neo4j_advice(exc: BaseException, settings: Any = None) -> str | None:
     """One actionable line for a Neo4j failure, or ``None`` if it isn't one.
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..core.errors import MissingExtra
 from .base import SchemaExtractor, parse_index_columns
 
 
@@ -14,7 +15,7 @@ class PostgresExtractor(SchemaExtractor):
         try:
             import psycopg2
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
+            raise MissingExtra(
                 "PostgreSQL support is not installed. Run: pip install 'graphforge-neo4j[postgres]'"
             ) from exc
         return psycopg2.connect(

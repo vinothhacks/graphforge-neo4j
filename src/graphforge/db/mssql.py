@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..core.errors import MissingExtra
 from .base import SchemaExtractor
 
 _SYSTEM_SCHEMAS = {
@@ -29,7 +30,7 @@ class MssqlExtractor(SchemaExtractor):
         try:
             import pyodbc
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
+            raise MissingExtra(
                 "SQL Server support is not installed. Run: "
                 "pip install 'graphforge-neo4j[mssql]' "
                 "(a system ODBC driver for SQL Server is also required)."

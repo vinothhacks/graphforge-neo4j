@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 from ..core.cypher import NodeRef, Operation, lit, merge_node, merge_rel
+from ..core.errors import MissingExtra
 from ..core.neo4j_writer import Neo4jWriter, load_schema
 from .base import DatabaseMeta
 
@@ -95,6 +96,8 @@ class DbIngestor:
                     log.info(
                         "auto-discovered %d database(s) on %s", len(databases), src.get("host")
                     )
+                except MissingExtra:
+                    raise  # categorical, not per-source: every source on this engine fails
                 except Exception as exc:  # noqa: BLE001  # discovery failed — skip this source, keep going
                     log.error("could not list databases on %s: %s", src.get("host"), exc)
                     failures.append(
@@ -111,6 +114,8 @@ class DbIngestor:
                     stats["databases"] += 1
                     stats["tables"] += counts["tables"]
                     stats["columns"] += counts["columns"]
+                except MissingExtra:
+                    raise  # categorical, not per-database: every database here fails
                 except Exception as exc:  # noqa: BLE001  # one bad database must not abort the rest
                     log.error("failed to ingest database %r: %s", database, exc)
                     failures.append({"database": database, "error": str(exc)})

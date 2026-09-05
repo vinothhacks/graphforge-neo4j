@@ -1,0 +1,6 @@
+# Files the wheel does not need but the sdist does.
+#
+# setuptools puts tests/*.py in the sdist and stops there, so
+# tests/test_mssql_fixtures.py shipped without the JSON it reads and the sdist's
+# own suite could not run. Anything under tests/fixtures/ is test input.
+recursive-include tests/fixtures *

@@ -38,6 +38,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, ClassVar
 
 from ..core.config import Neo4jSettings, load_settings
+from ..core.errors import MissingExtra
 
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 #: A LIMIT clause the user actually wrote, and a RETURN that can carry one.
@@ -891,7 +892,16 @@ def build_server(settings: Neo4jSettings | None = None, graph: Any = None):
     the ``connect=`` seam :func:`graphforge.ui.server.route` already uses, so the
     tools can be exercised without a database or the MCP runtime.
     """
-    from mcp.server.mcpserver import MCPServer  # lazy: only needed to actually serve
+    try:
+        from mcp.server.mcpserver import MCPServer  # lazy: only needed to actually serve
+    except ModuleNotFoundError as exc:
+        # The three DB drivers all fail this way; this one used to raise a bare
+        # ModuleNotFoundError. Covers "not installed" and "installed but 1.x",
+        # since 2.0 is where FastMCP became MCPServer.
+        raise MissingExtra(
+            "MCP support is not installed, or is older than the 2.x this needs. "
+            "Run: pip install -U 'graphforge-neo4j[mcp]'"
+        ) from exc
 
     settings = settings or load_settings().neo4j
     gq = graph if graph is not None else LazyGraph(settings)

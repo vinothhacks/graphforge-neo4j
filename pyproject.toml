@@ -34,7 +34,9 @@ classifiers = [
 # to graph a repository still had to build pyodbc, which needs a system ODBC
 # driver and is the most likely of the three to fail outright.
 dependencies = [
-    "neo4j>=5.0.0",
+    # Floor: execute_read/execute_write retry semantics settled in 5.14.
+    # Ceiling: 6.x is verified in use here; 7 is unreleased and unprobed.
+    "neo4j>=5.14,<7",
     "python-dotenv>=1.0.0",
     "tqdm>=4.65.0",
 ]

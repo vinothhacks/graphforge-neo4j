@@ -18,12 +18,29 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from . import __version__
 from .core.config import Settings, load_settings
 from .core.errors import neo4j_advice
 from .core.neo4j_writer import Neo4jWriter, load_schema
 
 log = logging.getLogger("graphforge.cli")
+
+
+class _VersionAction(argparse.Action):
+    """``--version`` that does not tax every other command.
+
+    argparse's built-in ``version`` action needs the string up front, so the
+    metadata lookup would run on every parser build — i.e. every invocation.
+    Resolving it inside ``__call__`` means only ``--version`` pays.
+    """
+
+    def __init__(self, option_strings, dest=argparse.SUPPRESS, help=None):
+        super().__init__(option_strings=option_strings, dest=dest, nargs=0, help=help)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from . import __version__
+
+        print(f"graphforge {__version__}")
+        parser.exit()
 
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -399,10 +416,18 @@ def cmd_ui(args) -> int:
     try:
         serve(s, host=args.host, port=args.port)
     except OSError as exc:
-        # EADDRINUSE (48 BSD / 98 Linux / 10048 Windows), plus WSAEACCES (10013),
-        # which is what Windows returns for a port inside a reserved exclusion
-        # range -- unavailable for the same reason, from the user's point of view.
-        if getattr(exc, "errno", None) in (48, 98, 10013, 10048):
+        # "Port not available" arrives under several numbers, on two different
+        # attributes. POSIX reports EADDRINUSE in errno (48 BSD / 98 Linux) and
+        # EACCES (13) for a privileged port. Windows raises PermissionError whose
+        # errno is the *translated* POSIX value (13) and keeps the WSA code --
+        # 10048 WSAEADDRINUSE, or 10013 WSAEACCES for a port in a reserved
+        # exclusion range -- on .winerror alone. Listing 10013/10048 under errno,
+        # where they can never appear, meant this branch never fired on Windows:
+        # a taken port printed a raw WinError string with no next-port hint.
+        if getattr(exc, "errno", None) in (13, 48, 98) or getattr(exc, "winerror", None) in (
+            10013,
+            10048,
+        ):
             raise RuntimeError(
                 f"port {args.port} is not available - try `graphforge ui --port {args.port + 1}`"
             ) from exc
@@ -506,7 +531,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="graphforge", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
-    parser.add_argument("--version", action="version", version=f"graphforge {__version__}")
+    parser.add_argument(
+        "--version", action=_VersionAction, help="show the installed version and exit"
+    )
     parser.add_argument(
         "-v",
         "--verbose",

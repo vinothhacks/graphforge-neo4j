@@ -8,6 +8,8 @@ table stopped being a table exactly when there was enough data to need one.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from graphforge import __version__
@@ -146,6 +148,47 @@ def test_a_missing_driver_names_an_extra_that_exists(engine, module, extra, monk
     )
 
 
+def test_a_missing_driver_is_not_swallowed_as_a_per_database_failure(tmp_path, monkeypatch):
+    """The message was always right; the ingest layer buried it.
+
+    `ingest_sources` swallows a per-database failure on purpose, so one bad
+    credential cannot abort a ten-database run. A missing driver is not that
+    kind of failure: it fails every database on the engine. Swallowed, it made
+    `graphforge db` log the `pip install` line at a level `-v` hides, print
+    "0 tables" and exit 0 — so no script or CI step could tell it had done
+    nothing. The test above asserts the wording; this one asserts it survives
+    the run loop.
+    """
+    import builtins
+
+    from graphforge.core.errors import MissingExtra
+    from graphforge.core.neo4j_writer import Neo4jWriter
+    from graphforge.db.ingest import DbIngestor
+
+    real_import = builtins.__import__
+
+    def fake_import(name, *args, **kwargs):
+        if name == "psycopg2" or name.startswith("psycopg2."):
+            raise ImportError("simulated missing driver")
+        return real_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", fake_import)
+    source = {
+        "engine": "postgres",
+        "host": "h",
+        "port": 1,
+        "user": "u",
+        "password": "p",
+        "databases": ["shopdb"],
+    }
+    with (
+        Neo4jWriter(settings=None, emit_path=str(tmp_path / "o.cypher")) as writer,
+        pytest.raises(MissingExtra) as err,
+    ):
+        DbIngestor(writer).ingest_sources([source])
+    assert "graphforge-neo4j[postgres]" in str(err.value)
+
+
 def test_all_extra_restores_every_optional_dependency():
     """`[all]` is the documented one-line way back to the pre-0.3 install."""
     from pathlib import Path
@@ -242,3 +285,39 @@ def test_status_with_nothing_ingested_says_so(monkeypatch, capsys):
     code = _run(monkeypatch, "cmd_status", _FakeWriter(repos=[]))
     assert code == 0
     assert "no repositories ingested yet" in capsys.readouterr().out
+
+
+# -------------------------------------------------------------------- ports --
+def test_a_taken_port_suggests_the_next_one(monkeypatch):
+    """The guard listed the WSA codes under errno, where they can never appear.
+
+    Windows raises PermissionError with errno 13 — the translated POSIX value —
+    and keeps the WSA code (10013 WSAEACCES for a reserved exclusion range,
+    10048 WSAEADDRINUSE otherwise) on .winerror alone. Checking errno against
+    (48, 98, 10013, 10048) therefore never matched on Windows, and a taken port
+    printed a raw WinError string with no next-port hint. Linux reaches the same
+    branch through errno 98, so this test is not Windows-only.
+    """
+    import socket
+
+    from graphforge import cli
+    from graphforge.core.config import DbSettings, Neo4jSettings, Settings
+
+    settings = Settings(
+        neo4j=Neo4jSettings(
+            uri="bolt://127.0.0.1:7687", user="neo4j", password="x", database="neo4j"
+        ),
+        db=DbSettings(engine="postgres", host="h", user="u", password="p"),
+    )
+    monkeypatch.setattr(cli, "_settings", lambda _args: settings)
+
+    holder = socket.socket()
+    holder.bind(("127.0.0.1", 0))
+    holder.listen(1)
+    port = holder.getsockname()[1]
+    try:
+        with pytest.raises(RuntimeError) as err:
+            cli.cmd_ui(SimpleNamespace(host="127.0.0.1", port=port))
+    finally:
+        holder.close()
+    assert f"--port {port + 1}" in str(err.value), err.value

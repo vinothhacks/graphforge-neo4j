@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Iterable
-from pathlib import Path
+from importlib import resources
 from typing import Any
 
 from .config import Neo4jSettings
@@ -24,12 +24,21 @@ from .cypher import Operation
 
 log = logging.getLogger("graphforge.writer")
 
-try:  # progress bar is optional
-    from tqdm import tqdm
-except ImportError:  # pragma: no cover
 
-    def tqdm(it, **_kwargs):  # type: ignore
+def tqdm(it, **kwargs):
+    """tqdm, imported on first use rather than at module import.
+
+    Importing tqdm costs ~77 ms — it reaches importlib.metadata through
+    tqdm.cli — and this module sits on graphforge.cli's import path, so every
+    command was paying for a progress bar most of them never draw. Falls back to
+    the bare iterable when tqdm is missing, exactly as the old module-level
+    try/except did.
+    """
+    try:
+        from tqdm import tqdm as _tqdm
+    except ImportError:  # pragma: no cover
         return it
+    return _tqdm(it, **kwargs)
 
 
 class Neo4jWriter:
@@ -242,6 +251,12 @@ def _split_statements(text: str) -> list[str]:
 
 
 def load_schema(name: str) -> str:
-    """Read a bundled schema file from graphforge/schema/."""
-    path = Path(__file__).resolve().parent.parent / "schema" / name
-    return path.read_text(encoding="utf-8")
+    """Read a bundled schema file from graphforge/schema/.
+
+    Resolved through importlib.resources rather than ``__file__``: the latter
+    assumes an unpacked install on a real filesystem, which is not true for a
+    zipimport or any other non-filesystem loader. Chained ``joinpath`` because
+    the multi-argument form is 3.11+, and this package supports 3.10.
+    """
+    resource = resources.files("graphforge").joinpath("schema").joinpath(name)
+    return resource.read_text(encoding="utf-8")
