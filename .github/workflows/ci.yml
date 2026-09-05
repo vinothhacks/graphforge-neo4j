@@ -132,9 +132,11 @@ jobs:
   # run against the tree. It has been now, and `ruff check src tests` is clean,
   # so a new violation should fail the build rather than scroll past.
   #
-  # `ruff format --diff` stays informational: the tree has never been formatted,
-  # so it reports a large diff. Do that reformat as its own isolated commit
-  # before turning it into `--check`.
+  # The tree was formatted in a697f48, so the format step is `--check` and
+  # blocking like the rest. The comment that used to sit here called
+  # `ruff format --diff` "informational". Nothing made it so: `--diff` exits
+  # non-zero on any diff, so against 61 unformatted files this job was simply
+  # failing, and had been since it was made blocking in 0e15297.
   # ---------------------------------------------------------------------------
   lint:
     name: lint (ruff)
@@ -148,11 +150,11 @@ jobs:
       # Pinned to the same version as .pre-commit-config.yaml so a local
       # `pre-commit run` and CI cannot disagree about what "clean" means.
       - name: Install ruff
-        run: python -m pip install "ruff==0.8.6"
+        run: python -m pip install "ruff==0.16.5"
       - name: ruff check
         run: ruff check --output-format=github src tests
-      - name: ruff format (report only)
-        run: ruff format --diff src tests
+      - name: ruff format --check
+        run: ruff format --check src tests
 
   # ---------------------------------------------------------------------------
   # Type checking. BLOCKING.

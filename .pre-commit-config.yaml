@@ -6,14 +6,12 @@
 #   pre-commit autoupdate              # bump the pinned revs below
 #
 # `rev`s are pinned to released tags rather than floating, so a hook release can
-# never silently change what a commit is checked against. They were pinned
-# offline, so run `pre-commit autoupdate` on the first machine that has network
-# access and commit the result.
+# never silently change what a commit is checked against. The ruff pin must stay
+# equal to the one in .github/workflows/ci.yml, or a local `pre-commit run` and
+# CI will disagree about what "clean" means.
 #
-# WARNING for the first run: `ruff-format` has never been executed against this
-# tree. `pre-commit run --all-files` will therefore reformat a large number of
-# files the first time. Do that as a single, isolated, review-only commit --
-# never mixed into a feature change.
+# The tree was formatted with ruff 0.16.5 in a697f48, so `pre-commit run
+# --all-files` is a no-op for `ruff-format` on a clean checkout.
 
 exclude: |
   (?x)^(
@@ -27,7 +25,7 @@ default_language_version:
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.6
+    rev: v0.16.5
     hooks:
       # Lint. --fix applies the safe autofixes (import sorting, comprehension
       # rewrites, ...); --exit-non-zero-on-fix stops the commit so the changes
