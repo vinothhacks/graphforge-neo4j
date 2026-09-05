@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import json
 import re
+import threading
 import time
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
@@ -729,17 +730,24 @@ class LazyGraph:
 
         self._settings = settings
         self._graph: GraphQuery | None = None
+        # mcp 2.x runs sync tool handlers in worker threads (verified: handlers
+        # execute on "AnyIO worker thread"), so two tool calls can enter
+        # connect() at once. Under 1.x they were serialised on the event loop
+        # and this could not happen. P7 replaces this with a real pool.
+        self._lock = threading.Lock()
 
     def connect(self) -> GraphQuery:
         if self._graph is None:
-            from ..core.errors import neo4j_advice
-            try:
-                self._graph = GraphQuery.connect(self._settings)
-            except Exception as exc:
-                advice = neo4j_advice(exc, self._settings)
-                if advice is None:
-                    raise
-                raise RuntimeError(advice) from exc
+            with self._lock:
+                if self._graph is None:
+                    from ..core.errors import neo4j_advice
+                    try:
+                        self._graph = GraphQuery.connect(self._settings)
+                    except Exception as exc:
+                        advice = neo4j_advice(exc, self._settings)
+                        if advice is None:
+                            raise
+                        raise RuntimeError(advice) from exc
         return self._graph
 
     def close(self) -> None:
@@ -754,17 +762,17 @@ class LazyGraph:
 
 
 def build_server(settings: Neo4jSettings | None = None, graph: Any = None):
-    """Construct a FastMCP server with graph tools bound to a lazy connection.
+    """Construct an MCPServer with graph tools bound to a lazy connection.
 
     ``graph`` injects a ready-made query object instead of connecting, mirroring
     the ``connect=`` seam :func:`graphforge.ui.server.route` already uses, so the
     tools can be exercised without a database or the MCP runtime.
     """
-    from mcp.server.fastmcp import FastMCP  # lazy: only needed to actually serve
+    from mcp.server.mcpserver import MCPServer  # lazy: only needed to actually serve
 
     settings = settings or load_settings().neo4j
     gq = graph if graph is not None else LazyGraph(settings)
-    server = FastMCP("graphforge")
+    server = MCPServer("graphforge")
 
     def _json(obj: Any) -> str:
         return json.dumps(obj, indent=2, default=str)

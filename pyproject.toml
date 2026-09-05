@@ -40,7 +40,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=1.2.0"]
+mcp = ["mcp>=2"]
 mysql = ["mysql-connector-python>=8.0"]
 postgres = ["psycopg2-binary>=2.9"]
 mssql = ["pyodbc>=5.0"]
@@ -57,7 +57,7 @@ dev = [
 ]
 # Everything, for anyone who wants the pre-0.3 behaviour back in one line.
 all = [
-    "mcp>=1.2.0",
+    "mcp>=2",
     "mysql-connector-python>=8.0",
     "psycopg2-binary>=2.9",
     "pyodbc>=5.0",

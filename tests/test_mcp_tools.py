@@ -6,9 +6,8 @@ injected clock rather than sleeping.
 """
 from __future__ import annotations
 
+import asyncio
 import json
-import sys
-import types
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -768,51 +767,50 @@ def test_blast_radius_of_an_unknown_path_says_so():
 
 
 # ================================================================ tool surface ==
-class _FakeFastMCP:
-    """Records the tools build_server registers, standing in for FastMCP."""
-
-    def __init__(self, name):
-        self.name = name
-        self.tools: dict[str, object] = {}
-
-    def tool(self):
-        def register(fn):
-            self.tools[fn.__name__] = fn
-            return fn
-        return register
-
-
 def _build_server_with_fakes(driver):
-    """Run build_server() with the mcp package and the Neo4j connection faked out."""
-    servers: list[_FakeFastMCP] = []
+    """Run build_server() against the REAL mcp package, with only Neo4j faked out.
 
-    def _factory(name):
-        server = _FakeFastMCP(name)
-        servers.append(server)
-        return server
+    The mcp package is deliberately not stubbed. An earlier version of this helper
+    injected fake ``mcp.server.fastmcp`` modules, so the suite stayed green while
+    the real import was broken: the SDK's 1.x -> 2.x rename of ``FastMCP`` to
+    ``MCPServer`` went undetected here and was found by hand instead. Building a
+    real server is what turns that class of break back into a test failure.
+    """
+    # Inject the graph rather than monkeypatching GraphQuery.connect: the
+    # connection is lazy now, so a patch that only spans build_server would
+    # be long gone by the time a tool actually calls through.
+    server = mcp.build_server(Neo4jSettings(uri="bolt://x:7687", database="neo4j"),
+                              graph=GraphQuery(driver, "neo4j"))
+    # Keep the {name: callable} shape the assertions below use. ``Tool.fn`` is the
+    # undecorated function, so tools stay directly callable with their real
+    # signatures and raised exceptions still propagate rather than being folded
+    # into a CallToolResult. ``_tool_manager`` is private mcp API and this is the
+    # only place that touches it.
+    server.tools = {t.name: t.fn for t in server._tool_manager.list_tools()}
+    return server
 
-    fastmcp = types.ModuleType("mcp.server.fastmcp")
-    fastmcp.FastMCP = _factory
-    mcp_server = types.ModuleType("mcp.server")
-    mcp_server.fastmcp = fastmcp
-    mcp_pkg = types.ModuleType("mcp")
-    mcp_pkg.server = mcp_server
-    saved = {name: sys.modules.get(name) for name in ("mcp", "mcp.server", "mcp.server.fastmcp")}
-    try:
-        sys.modules.update({"mcp": mcp_pkg, "mcp.server": mcp_server,
-                            "mcp.server.fastmcp": fastmcp})
-        # Inject the graph rather than monkeypatching GraphQuery.connect: the
-        # connection is lazy now, so a patch that only spans build_server would
-        # be long gone by the time a tool actually calls through.
-        mcp.build_server(Neo4jSettings(uri="bolt://x:7687", database="neo4j"),
-                         graph=GraphQuery(driver, "neo4j"))
-    finally:
-        for name, module in saved.items():
-            if module is None:
-                sys.modules.pop(name, None)
-            else:
-                sys.modules[name] = module
-    return servers[0]
+
+def test_build_server_uses_the_real_mcp_package():
+    """Regression guard for the blind spot that let the 1.x -> 2.x break ship.
+
+    build_server must import and instantiate the installed SDK. If the SDK moves
+    or renames the server class again, this fails loudly instead of passing
+    against a stub that cannot notice.
+    """
+    from mcp.server.mcpserver import MCPServer
+
+    server = _build_server_with_fakes(FakeDriver())
+    assert isinstance(server, MCPServer)
+    assert server.name == "graphforge"
+
+
+def test_tools_are_registered_on_the_real_protocol_surface():
+    """Registration reached the SDK itself, not just a local dict."""
+    server = _build_server_with_fakes(FakeDriver())
+    tools = asyncio.run(server.list_tools())
+    assert {t.name for t in tools} == set(server.tools)
+    for tool in tools:
+        assert (tool.description or "").strip(), f"{tool.name} has no description"
 
 
 def test_build_server_registers_every_documented_tool():
