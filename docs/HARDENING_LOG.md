@@ -25,8 +25,8 @@ evidence rather than recollection.
 
 | # | Phase | Status |
 |---|---|---|
-| 0 | Baseline, safety, format debt | in progress |
-| 1 | Packaging & pip | mcp 2.x fix landed early (see below) |
+| 0 | Baseline, safety, format debt | **complete** — `audit/p00-gate` |
+| 1 | Packaging & pip | partial — mcp 2.x fix landed early; build/ + wheel + venv matrix outstanding |
 | 2 | Browser harness + UI security | not started |
 | 3 | UI-A shell, status, tiles, first-run, theme, keys | not started |
 | 4 | UI-B canvas, inspector, legend | not started |
@@ -82,6 +82,56 @@ blocking (the only `continue-on-error: true` is on an unrelated job) and runs
 `ruff format --diff`, which exits non-zero against 61 unformatted files. The
 comment above the job claiming the step "stays informational" describes no
 mechanism that makes it so.
+
+**Reformat (a697f48).** `ruff format src tests` — 61 files reformatted, 8 already
+clean, nothing outside `src/` and `tests/` touched. AST-preservation proved by an
+identical suite either side: 290 passed / 10 deselected before, 290 passed / 10
+deselected after.
+
+**CI alignment (860ec03).** Both ruff pins moved 0.8.6 -> 0.16.5 together, and the
+format step became `ruff format --check`. CI's lint job simulated verbatim on this
+host: `ruff check --output-format=github src tests` clean, `ruff format --check src
+tests` reports 69 files already formatted, exit 0.
+
+**Docker recovered mid-phase.** The daemon came back and both playground
+containers restarted from their existing volumes
+(`graphforge-playground_playground_neo4j_data`, `..._pg_data`), on the recorded
+ports 7474/7687 and 55433.
+
+**S-2 re-proved — the graph is intact.** `graphforge verify --env audit.env
+--neo4j-uri bolt://127.0.0.1:7687` reports `Repository 4` and ~1,294 nodes,
+matching the plan's recorded ~1,290. `graphforge status` names all four with the
+recorded counts:
+
+| repository | status | files | commits |
+|---|---|---|---|
+| e2e-inc | completed | 2 | 2 |
+| e2e-replace | completed | 1 | 2 |
+| e2e-twice | completed | 1 | 1 |
+| graphforge | completed | 97 | 19 |
+
+**S-1 harness created.** `audit.env` (playground Neo4j + Postgres 55433) and
+`audit.env.empty` (the volume-less throwaway `graphforge-audit-empty` on 7688/7475,
+which cannot outlive the pass). Every `DB_*` in both points at localhost, so an
+accidental read cannot reach the corporate host.
+
+**Defect in the plan's own safety assumption.** The plan stated `audit.env` would
+be "matched by `.gitignore`'s `*.env`". That pattern matches only names *ending*
+in `.env`, so `audit.env.empty` was **not** ignored and would have been committed.
+Fixed with a scoped `audit.env*` rule. `*.env.*` was rejected because it would
+also match `.env.example` and defeat the `!.env.example` negation directly above
+it. Verified: both audit files ignored, `.env.example` still tracked.
+
+**Gate — G-1 and G-2 both green:**
+
+| Gate | Command | Result |
+|---|---|---|
+| Suite | `pytest -q -m "not e2e_critical and not e2e_full"` | **290 passed**, 10 deselected |
+| Lint | `ruff check src tests` | All checks passed |
+| Format | `ruff format --check src tests` | 69 files already formatted |
+| Types | `mypy` | Success, 40 source files |
+| S-1 | session env free of `NEO4J_*`/`DB_*`/`GF_*`; `audit.env` in use | proved |
+| S-2 | 4 repos, counts unchanged | proved |
 
 ## Phase 1 — Packaging & pip
 

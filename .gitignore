@@ -3,6 +3,10 @@
 .env
 *.env
 !.env.example
+# `*.env` above matches only names ENDING in .env, so the hardening pass's
+# audit.env.empty was not covered by it. Scoped rather than `*.env.*`,
+# which would re-ignore .env.example and defeat the negation above.
+audit.env*
 config/repositories.json
 config/databases.json
 config/connection.json
