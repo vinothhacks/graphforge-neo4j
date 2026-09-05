@@ -1,7 +1,8 @@
 """Structural parsing of Go source (graphforge.git.parsers.golang)."""
+
 from graphforge.git.parsers.golang import extract
 
-SRC = '''// Package store persists orders.
+SRC = """// Package store persists orders.
 package store
 
 import "fmt"
@@ -59,7 +60,7 @@ func (s *Store) Get(ctx context.Context, id string) (*Order, error) {
 func (s Store) internal() {}
 
 type Empty struct{}
-'''.splitlines()
+""".splitlines()
 
 
 def _by_name(items):
@@ -73,7 +74,12 @@ def test_package():
 def test_single_and_grouped_imports():
     imports = extract(SRC)["imports"]
     assert {i["fqn"] for i in imports} == {
-        "fmt", "net/http", "context", "database/sql", "github.com/google/uuid"}
+        "fmt",
+        "net/http",
+        "context",
+        "database/sql",
+        "github.com/google/uuid",
+    }
     aliases = {i["fqn"]: i["alias"] for i in imports}
     assert aliases["net/http"] == "netHttp"
     assert aliases["github.com/google/uuid"] == "uuid"
@@ -87,15 +93,15 @@ def test_structs():
     # embedded fields model Go composition
     assert classes["Order"]["extends"] == "Base"
     assert classes["Order"]["implements"] == ["Audit"]
-    assert classes["ID"]["type"] == "type"       # named type declaration
+    assert classes["ID"]["type"] == "type"  # named type declaration
     assert classes["Empty"]["type"] == "struct"  # `struct{}` on one line
-    assert "NotAStruct" not in classes           # inside a block comment
+    assert "NotAStruct" not in classes  # inside a block comment
 
 
 def test_interfaces():
     ifaces = _by_name(extract(SRC)["interfaces"])
     assert set(ifaces) == {"Repository", "Beta"}
-    assert ifaces["Repository"]["extends"] == "io.Closer"   # embedded interface
+    assert ifaces["Repository"]["extends"] == "io.Closer"  # embedded interface
     assert ifaces["Repository"]["isAbstract"] is True
 
 
@@ -109,13 +115,13 @@ def test_iota_const_block_becomes_an_enum():
 def test_funcs_and_methods_with_receivers():
     methods = _by_name(extract(SRC)["methods"])
     assert {"New", "Get", "internal", "Save", "Ping"} <= set(methods)
-    assert methods["New"]["owner"] == ""                 # package-level func
+    assert methods["New"]["owner"] == ""  # package-level func
     assert methods["New"]["returnType"] == "(*Store, error)"
     # the receiver names the owning type; the receiver's parens are not the args
     assert methods["internal"]["owner"] == "Store"
     assert methods["internal"]["receiver"] == "s"
     assert methods["internal"]["returnType"] == ""
-    assert methods["Save"]["owner"] == "Repository"      # interface signature
+    assert methods["Save"]["owner"] == "Repository"  # interface signature
     assert methods["Ping"]["owner"] == "Beta"
     # exported vs unexported identifiers
     assert methods["New"]["visibility"] == "public"
@@ -130,8 +136,22 @@ def test_pointer_receiver_method_binds_to_base_type():
 
 
 def test_malformed_input_never_raises():
-    for bad in ([], ["func (((("], ["type"], ["import ("], ['"unterminated'],
-                ["/* never closed"], ["\x00\xff"]):
+    for bad in (
+        [],
+        ["func (((("],
+        ["type"],
+        ["import ("],
+        ['"unterminated'],
+        ["/* never closed"],
+        ["\x00\xff"],
+    ):
         info = extract(bad)
-        assert set(info) >= {"package", "imports", "classes", "interfaces",
-                             "enums", "methods", "annotations"}
+        assert set(info) >= {
+            "package",
+            "imports",
+            "classes",
+            "interfaces",
+            "enums",
+            "methods",
+            "annotations",
+        }

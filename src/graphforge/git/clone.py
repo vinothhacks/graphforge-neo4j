@@ -6,6 +6,7 @@ through the remote URL. A URL carrying credentials leaks them into `ps` output,
 into `.git/config`, and into git's own error text, which then gets logged. The
 scrubber below is the second line of defence for that last one.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -94,8 +95,14 @@ class GitHandler:
             "GCM_INTERACTIVE": "never",
         }
         proc = subprocess.run(
-            ["git", *args], cwd=cwd, capture_output=True, text=True,
-            encoding="utf-8", errors="replace", timeout=timeout, check=False,
+            ["git", *args],
+            cwd=cwd,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
             env=env,
         )
         return proc.returncode, proc.stdout, proc.stderr

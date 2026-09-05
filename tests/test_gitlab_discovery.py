@@ -5,6 +5,7 @@ no check that a page contained anything new, so an API that kept answering with
 the same batch -- a caching proxy, a misconfigured gateway -- would spin forever
 building an ever-growing list.
 """
+
 from __future__ import annotations
 
 import sys
@@ -27,9 +28,11 @@ class _Response:
 
 
 def _project(name: str, branch: str | None = "main") -> dict:
-    return {"path": name,
-            "http_url_to_repo": f"https://gitlab.example/g/{name}.git",
-            "default_branch": branch}
+    return {
+        "path": name,
+        "http_url_to_repo": f"https://gitlab.example/g/{name}.git",
+        "default_branch": branch,
+    }
 
 
 @pytest.fixture
@@ -39,8 +42,14 @@ def fake_requests(monkeypatch):
     module = types.ModuleType("requests")
 
     def get(url, params=None, headers=None, timeout=None):
-        calls.append({"url": url, "params": dict(params or {}),
-                      "headers": dict(headers or {}), "timeout": timeout})
+        calls.append(
+            {
+                "url": url,
+                "params": dict(params or {}),
+                "headers": dict(headers or {}),
+                "timeout": timeout,
+            }
+        )
         return module.responder(params or {})
 
     module.get = get
@@ -106,8 +115,7 @@ def test_a_project_without_a_default_branch_falls_back(fake_requests):
     pages = {1: [_project("a", branch=None)], 2: []}
     fake_requests.responder = lambda params: _Response(pages[params["page"]])
 
-    specs = discover.gitlab_group_repos("https://gitlab.example", "42",
-                                        default_branch="trunk")
+    specs = discover.gitlab_group_repos("https://gitlab.example", "42", default_branch="trunk")
     assert specs[0]["branch"] == "trunk"
 
 
@@ -115,6 +123,7 @@ def test_a_missing_requests_says_which_extra_to_install(monkeypatch):
     """requests is an extra as of 0.3; discovery is the only thing that needs it."""
     monkeypatch.setitem(sys.modules, "requests", None)
     import builtins
+
     real_import = builtins.__import__
 
     def fake_import(name, *args, **kwargs):

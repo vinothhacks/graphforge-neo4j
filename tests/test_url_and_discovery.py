@@ -1,4 +1,5 @@
 """DB connection-URL parsing, auto-discovery, and continue-on-error ingestion."""
+
 import pytest
 
 import graphforge.db as dbmod
@@ -18,8 +19,8 @@ def test_parse_db_url_with_database():
 
 def test_parse_db_url_without_database_triggers_autodiscover():
     s = parse_db_url("mysql://root@127.0.0.1/")
-    assert s["port"] == 3306               # default port filled in
-    assert s["databases"] == []            # empty -> auto-discover
+    assert s["port"] == 3306  # default port filled in
+    assert s["databases"] == []  # empty -> auto-discover
 
 
 def test_parse_db_url_rejects_unknown_scheme():
@@ -29,6 +30,7 @@ def test_parse_db_url_rejects_unknown_scheme():
 
 class _FakeExtractor:
     """Stands in for a live DB: lists two databases; 'boom' fails to connect."""
+
     engine = "mysql"
 
     def __init__(self, **_kw):
@@ -43,8 +45,9 @@ class _FakeExtractor:
         meta = DatabaseMeta(name=database, engine="mysql", host="h")
         sm = SchemaMeta(name=database)
         sm.tables = [{"name": "t1"}]
-        sm.columns = [{"table": "t1", "name": "c1", "ordinal": 1,
-                       "dataType": "int", "isNullable": False}]
+        sm.columns = [
+            {"table": "t1", "name": "c1", "ordinal": 1, "dataType": "int", "isNullable": False}
+        ]
         meta.schemas = [sm]
         return meta
 
@@ -69,7 +72,8 @@ def test_autodiscovers_all_databases(tmp_path):
 
 def test_continue_on_error(tmp_path):
     stats, text = _run(
-        [{"engine": "mysql", "host": "h", "databases": ["alpha", "boom", "beta"]}], tmp_path)
-    assert stats["databases"] == 2     # alpha + beta succeeded
-    assert stats.get("failed") == 1    # boom failed but did not abort the run
-    assert "mysql://h/beta" in text    # run continued past the failure
+        [{"engine": "mysql", "host": "h", "databases": ["alpha", "boom", "beta"]}], tmp_path
+    )
+    assert stats["databases"] == 2  # alpha + beta succeeded
+    assert stats.get("failed") == 1  # boom failed but did not abort the run
+    assert "mysql://h/beta" in text  # run continued past the failure

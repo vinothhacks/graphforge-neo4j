@@ -9,6 +9,7 @@ replayed in cypher-shell or the Neo4j Browser.
 Using MERGE everywhere keeps ingestion idempotent: re-running an import updates
 existing nodes instead of duplicating them.
 """
+
 from __future__ import annotations
 
 import re
@@ -19,6 +20,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 # Literal rendering (only used for script output; the driver uses parameters)
 # ---------------------------------------------------------------------------
+
 
 def escape_cypher_string(value: str | None) -> str:
     """Escape a Python string for use inside a single-quoted Cypher literal."""
@@ -50,6 +52,7 @@ def lit(value: Any) -> str:
 # ---------------------------------------------------------------------------
 # Operation model
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class Operation:
@@ -99,6 +102,7 @@ def _label(name: str) -> str:
 # ---------------------------------------------------------------------------
 # Builders
 # ---------------------------------------------------------------------------
+
 
 def merge_node(
     label: str,

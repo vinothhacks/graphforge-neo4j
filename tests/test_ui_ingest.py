@@ -5,6 +5,7 @@ it must refuse a request that cannot present the per-run token; and it must neve
 render a credential into the page, which is the promise the rest of the dashboard
 already keeps.
 """
+
 from __future__ import annotations
 
 import json
@@ -30,12 +31,15 @@ def _settings():
 
 
 # ------------------------------------------------------------- redaction ----
-@pytest.mark.parametrize("url,expected", [
-    (DB_URL, "postgresql://gf:***@db.internal:5432/shop"),
-    ("postgresql://gf@db.internal/shop", "postgresql://gf@db.internal/shop"),
-    ("/plain/local/path", "/plain/local/path"),
-    ("", ""),
-])
+@pytest.mark.parametrize(
+    "url,expected",
+    [
+        (DB_URL, "postgresql://gf:***@db.internal:5432/shop"),
+        ("postgresql://gf@db.internal/shop", "postgresql://gf@db.internal/shop"),
+        ("/plain/local/path", "/plain/local/path"),
+        ("", ""),
+    ],
+)
 def test_redact_url_hides_only_the_password(url, expected):
     assert redact_url(url) == expected
 
@@ -81,17 +85,26 @@ def test_only_one_ingest_runs_at_a_time():
 # ----------------------------------------------------------------- routing --
 def test_ingest_endpoints_do_not_exist_when_disabled():
     """A public bind must expose no ingest surface at all, not one that refuses."""
-    for path, method in (("/api/ingest", "POST"), ("/api/ingest", "GET"),
-                         ("/api/ingest/abc", "GET")):
-        code, payload = srv.route(path, "", {"kind": "git", "source": "."}, _settings(),
-                                  method=method, ingest=None)
+    for path, method in (
+        ("/api/ingest", "POST"),
+        ("/api/ingest", "GET"),
+        ("/api/ingest/abc", "GET"),
+    ):
+        code, payload = srv.route(
+            path, "", {"kind": "git", "source": "."}, _settings(), method=method, ingest=None
+        )
         assert code == 404, (path, method)
         assert "disabled" in payload["error"]
 
 
 def test_status_reports_whether_ingest_is_available():
-    code, payload = srv.route("/api/status", "", None, _settings(),
-                              connect=lambda _s: (_ for _ in ()).throw(RuntimeError("down")))
+    code, payload = srv.route(
+        "/api/status",
+        "",
+        None,
+        _settings(),
+        connect=lambda _s: (_ for _ in ()).throw(RuntimeError("down")),
+    )
     assert code == 200
     assert payload["ingest"] == {"enabled": False, "running": False}
 
@@ -107,8 +120,9 @@ def test_route_reports_a_missing_job():
 def _serve(allow_ingest=True, host="127.0.0.1"):
     from http.server import ThreadingHTTPServer
 
-    server = ThreadingHTTPServer(("127.0.0.1", 0),
-                                 srv._handler(_settings(), host, allow_ingest=allow_ingest))
+    server = ThreadingHTTPServer(
+        ("127.0.0.1", 0), srv._handler(_settings(), host, allow_ingest=allow_ingest)
+    )
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server, thread, f"http://127.0.0.1:{server.server_address[1]}"
@@ -116,8 +130,11 @@ def _serve(allow_ingest=True, host="127.0.0.1"):
 
 def _post(base, path, body, headers=None):
     request = urllib.request.Request(
-        base + path, method="POST", data=json.dumps(body).encode("utf-8"),
-        headers={"Content-Type": "application/json", **(headers or {})})
+        base + path,
+        method="POST",
+        data=json.dumps(body).encode("utf-8"),
+        headers={"Content-Type": "application/json", **(headers or {})},
+    )
     try:
         with urllib.request.urlopen(request, timeout=10) as response:
             return response.status, json.load(response)
@@ -132,8 +149,9 @@ def test_an_ingest_without_the_token_is_refused():
         assert code == 403
         assert "X-GF-Token" in payload["error"]
 
-        code, payload = _post(base, "/api/ingest", {"kind": "git", "source": "."},
-                              {"X-GF-Token": "guessed"})
+        code, payload = _post(
+            base, "/api/ingest", {"kind": "git", "source": "."}, {"X-GF-Token": "guessed"}
+        )
         assert code == 403
     finally:
         server.shutdown()
@@ -147,7 +165,9 @@ def test_the_token_is_served_in_the_page_a_cross_origin_caller_cannot_read():
         with urllib.request.urlopen(base + "/", timeout=10) as response:
             html = response.read().decode("utf-8")
         # The tag, not the querySelector string that reads it -- that is always present.
-        assert '<meta name="gf-token" content="' in html,             "the page cannot authenticate its own requests"
+        assert '<meta name="gf-token" content="' in html, (
+            "the page cannot authenticate its own requests"
+        )
     finally:
         server.shutdown()
         server.server_close()

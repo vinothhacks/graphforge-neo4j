@@ -1,4 +1,5 @@
 """Live Neo4j CLI/HTTP (no browser). Skipped unless GF_E2E_CRITICAL=1."""
+
 from __future__ import annotations
 
 import json
@@ -31,8 +32,16 @@ def _neo():
 
 
 def _flags():
-    return ["--neo4j-uri", _URI, "--neo4j-user", _USER,
-            "--neo4j-password", _PASSWORD, "--neo4j-database", _DB]
+    return [
+        "--neo4j-uri",
+        _URI,
+        "--neo4j-user",
+        _USER,
+        "--neo4j-password",
+        _PASSWORD,
+        "--neo4j-database",
+        _DB,
+    ]
 
 
 def _git(cwd, *args):
@@ -82,8 +91,7 @@ def test_ingest_twice_no_dupes(tiny_repo):
     assert main(argv) == 0
     gq = GraphQuery.connect(_neo())
     try:
-        q = ("MATCH (n) WHERE n.repo = $r RETURN labels(n)[0] AS label, count(n) AS c "
-             "ORDER BY label")
+        q = "MATCH (n) WHERE n.repo = $r RETURN labels(n)[0] AS label, count(n) AS c ORDER BY label"
         first = {r["label"]: r["c"] for r in gq.read_cypher(q, {"r": name}, limit=50)}
         assert main(["git", str(tiny_repo), "--name", name, *_flags()]) == 0
         second = {r["label"]: r["c"] for r in gq.read_cypher(q, {"r": name}, limit=50)}
@@ -105,8 +113,8 @@ def test_replace_removes(tiny_repo):
     gq = GraphQuery.connect(_neo())
     try:
         rows = gq.read_cypher(
-            "MATCH (f:File) WHERE f.repo = $r RETURN f.path AS p",
-            {"r": name}, limit=50)
+            "MATCH (f:File) WHERE f.repo = $r RETURN f.path AS p", {"r": name}, limit=50
+        )
         paths = {r["p"] for r in rows}
         assert any(p and p.endswith("Gone.py") for p in paths)
         hello = [p for p in paths if p and p.endswith("Hello.py")]
@@ -115,12 +123,16 @@ def test_replace_removes(tiny_repo):
             "MATCH (f:File) WHERE f.repo = $r AND NOT EXISTS { "
             "MATCH ()-[:CONTAINS_FILE]->(f) } AND NOT EXISTS { "
             "MATCH (:Commit)-[:CHANGED]->(f) } RETURN count(f) AS c",
-            {"r": name}, limit=1)
+            {"r": name},
+            limit=1,
+        )
         commit_orphans = gq.read_cypher(
             "MATCH (c:Commit) WHERE c.repo = $r AND NOT EXISTS { "
             "MATCH (:Repository {id: $r})-[:HAS_COMMIT]->(c) } "
             "RETURN count(c) AS c",
-            {"r": name}, limit=1)
+            {"r": name},
+            limit=1,
+        )
         assert file_orphans[0]["c"] == 0
         assert commit_orphans[0]["c"] == 0
     finally:
@@ -141,8 +153,11 @@ def test_password_never_served_and_writes_rejected_over_http():
             assert _PASSWORD.encode() not in raw, path
         body = json.dumps({"cypher": "CREATE (n)"}).encode()
         req = urllib.request.Request(
-            base + "/api/query", method="POST", data=body,
-            headers={"Content-Type": "application/json"})
+            base + "/api/query",
+            method="POST",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
         with pytest.raises(urllib.error.HTTPError) as err:
             urllib.request.urlopen(req, timeout=15)
         assert err.value.code == 400

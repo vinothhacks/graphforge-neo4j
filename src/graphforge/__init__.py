@@ -2,6 +2,7 @@
 
 Published on PyPI as ``graphforge-neo4j``; imported as ``graphforge``.
 """
+
 from __future__ import annotations
 
 try:

@@ -45,7 +45,7 @@ def test_methods():
 
 def test_inline_annotations_on_declaration_line():
     # annotations sharing the class line must not swallow the declaration
-    info = extract(['package com.acme;', '@Entity @Table(name="orders") public class Order {}'])
+    info = extract(["package com.acme;", '@Entity @Table(name="orders") public class Order {}'])
     assert len(info["classes"]) == 1
     c = info["classes"][0]
     assert c["name"] == "Order"
@@ -54,9 +54,24 @@ def test_inline_annotations_on_declaration_line():
 
 
 def test_malformed_input_never_raises():
-    for bad in ([], ["class ((((("], ["public void )("], ["@@@@"],
-                ["package ;"], ["'''never closed"], ["\x00 binary"], ["import"]):
+    for bad in (
+        [],
+        ["class ((((("],
+        ["public void )("],
+        ["@@@@"],
+        ["package ;"],
+        ["'''never closed"],
+        ["\x00 binary"],
+        ["import"],
+    ):
         info = extract(bad)
         assert isinstance(info["classes"], list)
-        assert set(info) >= {"package", "imports", "classes", "interfaces",
-                             "enums", "methods", "annotations"}
+        assert set(info) >= {
+            "package",
+            "imports",
+            "classes",
+            "interfaces",
+            "enums",
+            "methods",
+            "annotations",
+        }

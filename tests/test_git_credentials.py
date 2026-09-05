@@ -4,6 +4,7 @@ Credentials used to be spliced into the remote URL. That put the token in `ps`
 output for every local user, wrote it into `.git/config`, and let git echo it
 back inside the error text that `GitError` then carried up to the console.
 """
+
 from __future__ import annotations
 
 import os
@@ -41,11 +42,14 @@ def test_a_port_is_kept_so_the_credential_matches_the_remote(tmp_path):
     assert "git.example:8443" in content
 
 
-@pytest.mark.parametrize("url", [
-    "git@github.com:octocat/Hello-World.git",
-    "ssh://git@example/x.git",
-    "https://github.com/public/repo.git",  # public: no credentials configured
-])
+@pytest.mark.parametrize(
+    "url",
+    [
+        "git@github.com:octocat/Hello-World.git",
+        "ssh://git@example/x.git",
+        "https://github.com/public/repo.git",  # public: no credentials configured
+    ],
+)
 def test_no_credential_plumbing_when_there_is_nothing_to_send(tmp_path, url):
     handler = _handler(tmp_path) if url.startswith("https") else _handler(tmp_path, token=TOKEN)
     with handler._credentials_for(url) as flags:
@@ -58,7 +62,8 @@ def test_the_remote_url_handed_to_git_carries_no_credentials(tmp_path):
 
     handler = _handler(tmp_path, token=TOKEN)
     handler._run = lambda args, cwd=None, timeout=900: (  # type: ignore[method-assign]
-        seen.append(list(args)) or (0, "", ""))
+        seen.append(list(args)) or (0, "", "")
+    )
     url = "https://gitlab.example/group/repo.git"
     handler.clone(url, "repo")
 
@@ -75,7 +80,10 @@ def test_git_output_is_scrubbed_before_it_becomes_an_exception(tmp_path, secret)
     handler = _handler(tmp_path, **kwargs)
     noisy = f"fatal: could not read from 'https://oauth2:{secret}@gitlab.example/g/r.git'"
     handler._run = lambda args, cwd=None, timeout=900: (  # type: ignore[method-assign]
-        1, "", noisy)
+        1,
+        "",
+        noisy,
+    )
 
     with pytest.raises(GitError) as err:
         handler.clone("https://gitlab.example/g/r.git", "repo")
@@ -99,6 +107,7 @@ def test_interactive_prompts_are_disabled_so_a_capture_cannot_hang(tmp_path, mon
 
         class _P:
             returncode, stdout, stderr = 0, "", ""
+
         return _P()
 
     monkeypatch.setattr("graphforge.git.clone.subprocess.run", fake_run)

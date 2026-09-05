@@ -6,6 +6,7 @@ the existing commands into the six-step sequence a new user otherwise has to
 assemble from the README by hand. Neither contains any ingest logic of its own:
 they call `cmd_init` / `cmd_git` / `cmd_db` / `cmd_link` like anybody else would.
 """
+
 from __future__ import annotations
 
 import os
@@ -50,8 +51,9 @@ def _driver_status(module: str, engine: str, extra: str) -> Check:
     try:
         __import__(module)
     except ImportError:
-        return Check(INFO, f"{engine} driver", "not installed",
-                     f"pip install 'graphforge-neo4j[{extra}]'")
+        return Check(
+            INFO, f"{engine} driver", "not installed", f"pip install 'graphforge-neo4j[{extra}]'"
+        )
     return Check(OK, f"{engine} driver", module)
 
 
@@ -61,13 +63,21 @@ def run_checks(settings: Settings, env_path: Path | None = None) -> list[Check]:
 
     # -- the machine -------------------------------------------------------
     version = ".".join(str(p) for p in sys.version_info[:3])
-    checks.append(Check(OK if sys.version_info >= (3, 10) else FAIL,
-                        "python", version, "graphforge needs Python 3.10 or newer"))
+    checks.append(
+        Check(
+            OK if sys.version_info >= (3, 10) else FAIL,
+            "python",
+            version,
+            "graphforge needs Python 3.10 or newer",
+        )
+    )
 
     git = shutil.which("git")
-    checks.append(Check(OK, "git", git) if git else
-                  Check(FAIL, "git", "not on PATH",
-                        "install git - `graphforge git` shells out to it"))
+    checks.append(
+        Check(OK, "git", git)
+        if git
+        else Check(FAIL, "git", "not on PATH", "install git - `graphforge git` shells out to it")
+    )
 
     # -- configuration -----------------------------------------------------
     env_file = Path(env_path) if env_path else Path.cwd() / ".env"
@@ -76,16 +86,18 @@ def run_checks(settings: Settings, env_path: Path | None = None) -> list[Check]:
     elif os.getenv("NEO4J_PASSWORD"):
         checks.append(Check(OK, ".env", "not present (NEO4J_* set in the environment)"))
     else:
-        checks.append(Check(WARN, ".env", "not found",
-                            "cp .env.example .env, then set NEO4J_PASSWORD"))
+        checks.append(
+            Check(WARN, ".env", "not found", "cp .env.example .env, then set NEO4J_PASSWORD")
+        )
 
     neo = settings.neo4j
     checks.append(Check(OK, "NEO4J_URI", neo.uri))
     if neo.password or os.getenv("GF_ALLOW_EMPTY_PASSWORD"):
         checks.append(Check(OK, "NEO4J_PASSWORD", "set"))
     else:
-        checks.append(Check(FAIL, "NEO4J_PASSWORD", "not set",
-                            "set it in .env, or pass --neo4j-password"))
+        checks.append(
+            Check(FAIL, "NEO4J_PASSWORD", "not set", "set it in .env, or pass --neo4j-password")
+        )
 
     # -- the graph ---------------------------------------------------------
     checks.extend(_graph_checks(settings))
@@ -97,10 +109,17 @@ def run_checks(settings: Settings, env_path: Path | None = None) -> list[Check]:
 
     try:
         import mcp  # noqa: F401
+
         checks.append(Check(OK, "mcp extra", "installed"))
     except ImportError:
-        checks.append(Check(WARN, "mcp extra", "not installed",
-                            "pip install 'graphforge-neo4j[mcp]' to serve the graph"))
+        checks.append(
+            Check(
+                WARN,
+                "mcp extra",
+                "not installed",
+                "pip install 'graphforge-neo4j[mcp]' to serve the graph",
+            )
+        )
 
     checks.extend(_client_checks())
     return checks
@@ -116,6 +135,7 @@ def _graph_checks(settings: Settings) -> list[Check]:
         graph = GraphQuery.connect(settings.neo4j)
     except Exception as exc:  # noqa: BLE001 — doctor reports failures, never raises
         from .cli import neo4j_advice
+
         advice = neo4j_advice(exc, settings) or str(exc)
         head, _, rest = advice.partition("\n")
         # One hint only: the report is a column, and a wrapped fix breaks it.
@@ -125,21 +145,27 @@ def _graph_checks(settings: Settings) -> list[Check]:
     try:
         counts = graph.get_schema(refresh=True).get("nodeCountsByLabel") or {}
     except Exception as exc:  # noqa: BLE001 — a reachable but unusable graph is a finding
-        return [Check(OK, "neo4j", f"reachable at {settings.neo4j.uri}"),
-                Check(FAIL, "graph", f"could not read the schema: {exc}")]
+        return [
+            Check(OK, "neo4j", f"reachable at {settings.neo4j.uri}"),
+            Check(FAIL, "graph", f"could not read the schema: {exc}"),
+        ]
     finally:
         graph.close()
 
-    checks = [Check(OK, "neo4j", f"reachable at {settings.neo4j.uri} "
-                                 f"(database={settings.neo4j.database})")]
+    checks = [
+        Check(
+            OK, "neo4j", f"reachable at {settings.neo4j.uri} (database={settings.neo4j.database})"
+        )
+    ]
     total = sum(int(v or 0) for v in counts.values())
     if total:
         top = sorted(counts.items(), key=lambda kv: -int(kv[1] or 0))[:4]
         summary = ", ".join(f"{label} {count}" for label, count in top)
         checks.append(Check(OK, "graph", f"{total} nodes - {summary}"))
     else:
-        checks.append(Check(WARN, "graph", "empty",
-                            "run `graphforge quickstart`, or `graphforge git <path>`"))
+        checks.append(
+            Check(WARN, "graph", "empty", "run `graphforge quickstart`, or `graphforge git <path>`")
+        )
     return checks
 
 
@@ -167,8 +193,7 @@ def report(checks: list[Check], out=None) -> int:
     failures = [c for c in checks if c.failed]
     print(file=stream)
     if failures:
-        print(f"{len(failures)} check(s) failed - fix the arrows above and re-run.",
-              file=stream)
+        print(f"{len(failures)} check(s) failed - fix the arrows above and re-run.", file=stream)
         return 1
     print("All checks passed.", file=stream)
     return 0
@@ -229,10 +254,13 @@ def _sub_args(argv: list[str], args):
     from .cli import build_parser
 
     passthrough: list[str] = []
-    for flag, attr in (("--env", "env"), ("--neo4j-uri", "neo4j_uri"),
-                       ("--neo4j-user", "neo4j_user"),
-                       ("--neo4j-password", "neo4j_password"),
-                       ("--neo4j-database", "neo4j_database")):
+    for flag, attr in (
+        ("--env", "env"),
+        ("--neo4j-uri", "neo4j_uri"),
+        ("--neo4j-user", "neo4j_user"),
+        ("--neo4j-password", "neo4j_password"),
+        ("--neo4j-database", "neo4j_database"),
+    ):
         value = getattr(args, attr, None)
         if value:
             passthrough += [flag, str(value)]
@@ -245,8 +273,10 @@ def quickstart(args) -> int:
 
     yes = bool(getattr(args, "yes", False))
     total = 6
-    print("graphforge quickstart - from an empty database to a connected graph.\n"
-          "Nothing here is irreversible; every step is a command you can re-run.")
+    print(
+        "graphforge quickstart - from an empty database to a connected graph.\n"
+        "Nothing here is irreversible; every step is a command you can re-run."
+    )
 
     # 1. configuration
     _step(1, total, "Configuration")
@@ -254,8 +284,7 @@ def quickstart(args) -> int:
     settings = _settings(args)
     if not settings.neo4j.password and not os.getenv("GF_ALLOW_EMPTY_PASSWORD"):
         if yes:
-            print("error: NEO4J_PASSWORD is not set and --yes cannot invent one.",
-                  file=sys.stderr)
+            print("error: NEO4J_PASSWORD is not set and --yes cannot invent one.", file=sys.stderr)
             return 2
         password = _ask("Neo4j password")
         if not password:
@@ -271,10 +300,12 @@ def quickstart(args) -> int:
     _step(2, total, "Connecting")
     args.neo4j_password = settings.neo4j.password
     from .mcp.server import GraphQuery
+
     try:
         GraphQuery.connect(settings.neo4j).close()
     except Exception as exc:  # noqa: BLE001 — turn this into advice, not a traceback
         from .cli import neo4j_advice
+
         print(f"error: {neo4j_advice(exc, settings) or exc}", file=sys.stderr)
         return 2
     print("  connected.")
@@ -287,12 +318,12 @@ def quickstart(args) -> int:
     _step(4, total, "Loading data")
     loaded = False
     repo = getattr(args, "repo", "") or (
-        "" if yes else _ask("Path or URL of a git repo (blank to skip)"))
+        "" if yes else _ask("Path or URL of a git repo (blank to skip)")
+    )
     if repo:
         cmd_git(_sub_args(["git", repo], args))
         loaded = True
-    db_url = getattr(args, "db_url", "") or (
-        "" if yes else _ask("Database URL (blank to skip)"))
+    db_url = getattr(args, "db_url", "") or ("" if yes else _ask("Database URL (blank to skip)"))
     if db_url:
         cmd_db(_sub_args(["db", "--url", db_url], args))
         loaded = True

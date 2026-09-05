@@ -1,12 +1,13 @@
 """graphforge command-line interface.
 
-    graphforge init            # create graph constraints & indexes
-    graphforge git  [...]      # ingest git repositories (structure + history)
-    graphforge db   [...]      # ingest relational database schemas
-    graphforge mcp             # serve the graph over MCP
-    graphforge search QUERY    # search code / schema nodes in the graph
-    graphforge verify          # connect and report node counts per label
+graphforge init            # create graph constraints & indexes
+graphforge git  [...]      # ingest git repositories (structure + history)
+graphforge db   [...]      # ingest relational database schemas
+graphforge mcp             # serve the graph over MCP
+graphforge search QUERY    # search code / schema nodes in the graph
+graphforge verify          # connect and report node counts per label
 """
+
 from __future__ import annotations
 
 import argparse
@@ -27,24 +28,49 @@ log = logging.getLogger("graphforge.cli")
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--env", metavar="FILE", help="path to a .env file to load")
-    p.add_argument("--neo4j-uri", dest="neo4j_uri", metavar="URI",
-                   help="override NEO4J_URI (default bolt://127.0.0.1:7687)")
-    p.add_argument("--neo4j-user", dest="neo4j_user", metavar="NAME",
-                   help="override NEO4J_USER (default neo4j)")
-    p.add_argument("--neo4j-password", dest="neo4j_password", metavar="PASSWORD",
-                   help="override NEO4J_PASSWORD (prefer .env: a password on the "
-                        "command line is visible to other users)")
-    p.add_argument("--neo4j-database", dest="neo4j_database", metavar="NAME",
-                   help="override NEO4J_DATABASE (Community Edition only has 'neo4j')")
+    p.add_argument(
+        "--neo4j-uri",
+        dest="neo4j_uri",
+        metavar="URI",
+        help="override NEO4J_URI (default bolt://127.0.0.1:7687)",
+    )
+    p.add_argument(
+        "--neo4j-user",
+        dest="neo4j_user",
+        metavar="NAME",
+        help="override NEO4J_USER (default neo4j)",
+    )
+    p.add_argument(
+        "--neo4j-password",
+        dest="neo4j_password",
+        metavar="PASSWORD",
+        help="override NEO4J_PASSWORD (prefer .env: a password on the "
+        "command line is visible to other users)",
+    )
+    p.add_argument(
+        "--neo4j-database",
+        dest="neo4j_database",
+        metavar="NAME",
+        help="override NEO4J_DATABASE (Community Edition only has 'neo4j')",
+    )
 
 
 def _add_writer_opts(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--emit", metavar="FILE",
-                   help="write a replayable .cypher script instead of pushing to Neo4j")
-    p.add_argument("--dry-run", action="store_true",
-                   help="build operations but neither connect nor write (just count)")
-    p.add_argument("--no-schema", action="store_true",
-                   help="skip creating constraints/indexes before ingesting")
+    p.add_argument(
+        "--emit",
+        metavar="FILE",
+        help="write a replayable .cypher script instead of pushing to Neo4j",
+    )
+    p.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="build operations but neither connect nor write (just count)",
+    )
+    p.add_argument(
+        "--no-schema",
+        action="store_true",
+        help="skip creating constraints/indexes before ingesting",
+    )
 
 
 #: The settings the current command resolved, so the top-level error handler can
@@ -68,12 +94,14 @@ def _settings(args) -> Settings:
 
 
 def _writer(s: Settings, args) -> Neo4jWriter:
-    return Neo4jWriter(s.neo4j, emit_path=getattr(args, "emit", None),
-                       dry_run=getattr(args, "dry_run", False))
+    return Neo4jWriter(
+        s.neo4j, emit_path=getattr(args, "emit", None), dry_run=getattr(args, "dry_run", False)
+    )
 
 
-def print_table(headers: list[str], rows: list[list[Any]], *,
-                right: tuple[int, ...] = (), max_width: int = 46) -> None:
+def print_table(
+    headers: list[str], rows: list[list[Any]], *, right: tuple[int, ...] = (), max_width: int = 46
+) -> None:
     """Print an aligned table that survives real data.
 
     Fixed widths (``f"{value:44s}"``) set a *minimum*, not a maximum, so any
@@ -97,8 +125,14 @@ def print_table(headers: list[str], rows: list[list[Any]], *,
         for i, value in enumerate(values):
             # The last column is never padded: trailing spaces serve no one.
             pad = "" if i == len(values) - 1 else " "
-            out.append((value.rjust(widths[i]) if i in right else
-                        (value if i == len(values) - 1 else value.ljust(widths[i]))) + pad)
+            out.append(
+                (
+                    value.rjust(widths[i])
+                    if i in right
+                    else (value if i == len(values) - 1 else value.ljust(widths[i]))
+                )
+                + pad
+            )
         return "".join(out).rstrip()
 
     print(line(headers))
@@ -134,9 +168,12 @@ def _resolve_git_sources(args, git_settings) -> list[dict]:
             specs.append({"path": item, "name": args.name})
     if not specs and git_settings.gitlab_server and git_settings.gitlab_group_id:
         from .git.discover import gitlab_group_repos
+
         specs = gitlab_group_repos(
-            git_settings.gitlab_server, git_settings.gitlab_group_id,
-            git_settings.gitlab_token, git_settings.default_branch,
+            git_settings.gitlab_server,
+            git_settings.gitlab_group_id,
+            git_settings.gitlab_token,
+            git_settings.default_branch,
             since_days=getattr(args, "since", 0) or 0,
         )
     return specs
@@ -148,7 +185,10 @@ def cmd_git(args) -> int:
     s = _settings(args)
     specs = _resolve_git_sources(args, s.git)
     if not specs:
-        print("nothing to ingest: pass a path/URL, -c config.json, or set GITLAB_* env", file=sys.stderr)
+        print(
+            "nothing to ingest: pass a path/URL, -c config.json, or set GITLAB_* env",
+            file=sys.stderr,
+        )
         return 2
     with _writer(s, args) as w:
         gi = GitIngestor(w, s.git)
@@ -174,7 +214,11 @@ def cmd_git(args) -> int:
 # ----------------------------------------------------------------------------
 def _default_schemas(engine: str, db_settings) -> list[str]:
     """PG_SCHEMAS is a PostgreSQL default; other engines discover their own."""
-    return list(db_settings.pg_schemas) if (engine or "").lower().startswith(("pg", "postgres")) else []
+    return (
+        list(db_settings.pg_schemas)
+        if (engine or "").lower().startswith(("pg", "postgres"))
+        else []
+    )
 
 
 def _resolve_db_sources(args, db_settings) -> list[dict]:
@@ -193,6 +237,7 @@ def _resolve_db_sources(args, db_settings) -> list[dict]:
     url = getattr(args, "url", None) or os.getenv("DB_URL")
     if url:
         from .db import parse_db_url
+
         src = parse_db_url(url)
         if args.databases:
             src["databases"] = [d.strip() for d in args.databases.split(",") if d.strip()]
@@ -204,30 +249,41 @@ def _resolve_db_sources(args, db_settings) -> list[dict]:
         return [src]
 
     engine = args.engine or db_settings.engine
-    databases = (args.databases.split(",") if args.databases else db_settings.names)
-    return [{
-        "engine": engine,
-        "host": args.host or db_settings.host,
-        "port": args.port or db_settings.port,
-        "user": args.user or db_settings.user,
-        "password": args.password or db_settings.password,
-        # empty -> auto-discover every non-system database on the server
-        "databases": [d.strip() for d in databases if d.strip()],
-        "driver": args.driver or db_settings.mssql_driver,
-        "schemas": (args.schemas.split(",") if args.schemas
-                    else _default_schemas(engine, db_settings)),
-        "sampleRows": sample_rows,
-    }]
+    databases = args.databases.split(",") if args.databases else db_settings.names
+    return [
+        {
+            "engine": engine,
+            "host": args.host or db_settings.host,
+            "port": args.port or db_settings.port,
+            "user": args.user or db_settings.user,
+            "password": args.password or db_settings.password,
+            # empty -> auto-discover every non-system database on the server
+            "databases": [d.strip() for d in databases if d.strip()],
+            "driver": args.driver or db_settings.mssql_driver,
+            "schemas": (
+                args.schemas.split(",") if args.schemas else _default_schemas(engine, db_settings)
+            ),
+            "sampleRows": sample_rows,
+        }
+    ]
 
 
 def cmd_db(args) -> int:
     from .db import DbIngestor
 
-    have_conn = bool(getattr(args, "url", None) or args.config or args.host
-                     or os.getenv("DB_URL") or os.getenv("DB_HOST"))
+    have_conn = bool(
+        getattr(args, "url", None)
+        or args.config
+        or args.host
+        or os.getenv("DB_URL")
+        or os.getenv("DB_HOST")
+    )
     if not have_conn:
-        print("provide a connection: --url <db-url>, or --host …, or -c config.json "
-              "(or set DB_URL / DB_HOST)", file=sys.stderr)
+        print(
+            "provide a connection: --url <db-url>, or --host …, or -c config.json "
+            "(or set DB_URL / DB_HOST)",
+            file=sys.stderr,
+        )
         return 2
     s = _settings(args)
     sources = _resolve_db_sources(args, s.db)
@@ -236,7 +292,9 @@ def cmd_db(args) -> int:
         if not args.no_schema:
             di.apply_schema()
         stats = di.ingest_sources(sources, replace=args.replace)
-        extra = f"{stats['databases']} databases, {stats['tables']} tables, {stats['columns']} columns"
+        extra = (
+            f"{stats['databases']} databases, {stats['tables']} tables, {stats['columns']} columns"
+        )
         if stats.get("failed"):
             extra += f", {stats['failed']} failed (see log with -v)"
         _report(w, extra)
@@ -294,13 +352,19 @@ def cmd_vds(args) -> int:
         if not args.no_schema:
             vi.apply_schema()
         stats = vi.ingest(
-            engine=args.engine or s.db.engine, host=args.host or s.db.host,
-            port=args.port or s.db.port, user=args.user or s.db.user,
-            password=args.password or s.db.password, database=database,
+            engine=args.engine or s.db.engine,
+            host=args.host or s.db.host,
+            port=args.port or s.db.port,
+            user=args.user or s.db.user,
+            password=args.password or s.db.password,
+            database=database,
             driver=args.driver or s.db.mssql_driver,
         )
-        _report(w, f"{stats['services']} VDS services, {stats['queries']} queries, "
-                   f"{stats['whereFields']} where-fields")
+        _report(
+            w,
+            f"{stats['services']} VDS services, {stats['queries']} queries, "
+            f"{stats['whereFields']} where-fields",
+        )
     return 0
 
 
@@ -313,9 +377,18 @@ def cmd_status(args) -> int:
         return 0
     print_table(
         ["repository", "status", "files", "commits", "lastIngestedAt"],
-        [[r.get("name"), r.get("status"), r.get("files") or 0,
-          r.get("commits") or 0, r.get("lastIngestedAt")] for r in rows],
-        right=(2, 3))
+        [
+            [
+                r.get("name"),
+                r.get("status"),
+                r.get("files") or 0,
+                r.get("commits") or 0,
+                r.get("lastIngestedAt"),
+            ]
+            for r in rows
+        ],
+        right=(2, 3),
+    )
     return 0
 
 
@@ -331,8 +404,8 @@ def cmd_ui(args) -> int:
         # range -- unavailable for the same reason, from the user's point of view.
         if getattr(exc, "errno", None) in (48, 98, 10013, 10048):
             raise RuntimeError(
-                f"port {args.port} is not available - "
-                f"try `graphforge ui --port {args.port + 1}`") from exc
+                f"port {args.port} is not available - try `graphforge ui --port {args.port + 1}`"
+            ) from exc
         raise
     return 0
 
@@ -388,8 +461,7 @@ def cmd_search(args) -> int:
     s = _settings(args)
     gq = GraphQuery.connect(s.neo4j)
     try:
-        page = gq.search_codebase(
-            query, kind=args.kind, repo=args.repo or "", limit=args.limit)
+        page = gq.search_codebase(query, kind=args.kind, repo=args.repo or "", limit=args.limit)
     finally:
         gq.close()
     rows = page["rows"]
@@ -397,14 +469,31 @@ def cmd_search(args) -> int:
         print("[graphforge] no matches")
         return 0
     if args.kind == "schema":
-        print_table(["labels", "name", "database", "table"],
-                    [[",".join(row.get("labels") or []), row.get("name"),
-                      row.get("database"), row.get("table")] for row in rows])
+        print_table(
+            ["labels", "name", "database", "table"],
+            [
+                [
+                    ",".join(row.get("labels") or []),
+                    row.get("name"),
+                    row.get("database"),
+                    row.get("table"),
+                ]
+                for row in rows
+            ],
+        )
     else:
-        print_table(["labels", "name", "ref", "repo"],
-                    [[",".join(row.get("labels") or []), row.get("name"),
-                      row.get("ref") or row.get("database") or "", row.get("repo")]
-                     for row in rows])
+        print_table(
+            ["labels", "name", "ref", "repo"],
+            [
+                [
+                    ",".join(row.get("labels") or []),
+                    row.get("name"),
+                    row.get("ref") or row.get("database") or "",
+                    row.get("repo"),
+                ]
+                for row in rows
+            ],
+        )
     more = f", {page['total']} total - pass a higher --limit" if page.get("hasMore") else ""
     print(f"[graphforge] {len(rows)} match(es){more}")
     return 0
@@ -414,11 +503,16 @@ def cmd_search(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     from .link import passes as link_passes  # for the --min-table-name-len default
 
-    parser = argparse.ArgumentParser(prog="graphforge", description=__doc__,
-                                     formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser = argparse.ArgumentParser(
+        prog="graphforge", description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
+    )
     parser.add_argument("--version", action="version", version=f"graphforge {__version__}")
-    parser.add_argument("-v", "--verbose", action="store_true",
-                        help="log what is happening, including per-source failures")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="log what is happening, including per-source failures",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p_init = sub.add_parser("init", help="create graph constraints and indexes")
@@ -434,20 +528,35 @@ def build_parser() -> argparse.ArgumentParser:
     p_git.add_argument("--lines", action="store_true", help="store per-line :Line nodes (heavy)")
     p_git.add_argument("--no-structure", action="store_true", help="skip code structure")
     p_git.add_argument("--no-history", action="store_true", help="skip commit history")
-    p_git.add_argument("--replace", action="store_true", help="delete each repo's existing subgraph first")
-    p_git.add_argument("--since", type=int, default=0, metavar="DAYS",
-                       help="GitLab discovery: only repos active in the last N days")
-    p_git.add_argument("--since-commit", dest="since_commit", metavar="SHA", default="",
-                       help="incremental ingest: only commits after SHA (or 'auto' to "
-                            "continue from :Repository.lastCommit)")
+    p_git.add_argument(
+        "--replace", action="store_true", help="delete each repo's existing subgraph first"
+    )
+    p_git.add_argument(
+        "--since",
+        type=int,
+        default=0,
+        metavar="DAYS",
+        help="GitLab discovery: only repos active in the last N days",
+    )
+    p_git.add_argument(
+        "--since-commit",
+        dest="since_commit",
+        metavar="SHA",
+        default="",
+        help="incremental ingest: only commits after SHA (or 'auto' to "
+        "continue from :Repository.lastCommit)",
+    )
     _add_common(p_git)
     _add_writer_opts(p_git)
     p_git.set_defaults(func=cmd_git)
 
     p_db = sub.add_parser("db", help="ingest relational database schemas")
     p_db.add_argument("-c", "--config", help="databases.json")
-    p_db.add_argument("--url", help="connection URL, e.g. postgresql://user:pass@host:5432/dbname "
-                                     "(omit the database to graph every non-system database)")
+    p_db.add_argument(
+        "--url",
+        help="connection URL, e.g. postgresql://user:pass@host:5432/dbname "
+        "(omit the database to graph every non-system database)",
+    )
     p_db.add_argument("--engine", help="mysql | postgres | mssql")
     p_db.add_argument("--host")
     p_db.add_argument("--port", type=int)
@@ -456,11 +565,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_db.add_argument("--databases", help="comma-separated database names")
     p_db.add_argument("--driver", help="MSSQL ODBC driver name")
     p_db.add_argument("--schemas", help="comma-separated schema filter (postgres/mssql)")
-    p_db.add_argument("--sample-rows", dest="sample_rows", type=int, default=0, metavar="N",
-                      help="opt-in profiling: COUNT(*) every table into :Table.approxRows, "
-                           "and for tables of at most N rows also COUNT(DISTINCT col) into "
-                           ":Column.approxCardinality (default 0 = off)")
-    p_db.add_argument("--replace", action="store_true", help="delete each database's existing subgraph first")
+    p_db.add_argument(
+        "--sample-rows",
+        dest="sample_rows",
+        type=int,
+        default=0,
+        metavar="N",
+        help="opt-in profiling: COUNT(*) every table into :Table.approxRows, "
+        "and for tables of at most N rows also COUNT(DISTINCT col) into "
+        ":Column.approxCardinality (default 0 = off)",
+    )
+    p_db.add_argument(
+        "--replace", action="store_true", help="delete each database's existing subgraph first"
+    )
     _add_common(p_db)
     _add_writer_opts(p_db)
     p_db.set_defaults(func=cmd_db)
@@ -480,12 +597,19 @@ def build_parser() -> argparse.ArgumentParser:
     p_link = sub.add_parser("link", help="create code<->database links over the loaded graph")
     p_link.add_argument("--maps-to", action="store_true", help="JPA entity -> Table")
     p_link.add_argument("--based-on", action="store_true", help="View -> Table (same DB)")
-    p_link.add_argument("--uses-table", action="store_true", help="StoredProcedure -> Table (same DB)")
+    p_link.add_argument(
+        "--uses-table", action="store_true", help="StoredProcedure -> Table (same DB)"
+    )
     p_link.add_argument("--cross-db", action="store_true", help="View -> Table (different DB)")
-    p_link.add_argument("--min-table-name-len", dest="min_table_name_len", type=int,
-                        default=link_passes.DEFAULT_MIN_NAME_LEN, metavar="N",
-                        help="ignore table names shorter than N characters in the SQL-text "
-                             f"passes (default {link_passes.DEFAULT_MIN_NAME_LEN})")
+    p_link.add_argument(
+        "--min-table-name-len",
+        dest="min_table_name_len",
+        type=int,
+        default=link_passes.DEFAULT_MIN_NAME_LEN,
+        metavar="N",
+        help="ignore table names shorter than N characters in the SQL-text "
+        f"passes (default {link_passes.DEFAULT_MIN_NAME_LEN})",
+    )
     _add_common(p_link)
     _add_writer_opts(p_link)
     p_link.set_defaults(func=cmd_link)
@@ -499,56 +623,85 @@ def build_parser() -> argparse.ArgumentParser:
     p_status.set_defaults(func=cmd_status)
 
     p_ui = sub.add_parser("ui", help="serve a local web dashboard (config + load status)")
-    p_ui.add_argument("--host", default="127.0.0.1", metavar="ADDR",
-                      help="address to bind (default 127.0.0.1). The dashboard has no "
-                           "authentication and /api/status reports your configuration, so "
-                           "binding publicly exposes it; guided ingest is disabled if you do")
-    p_ui.add_argument("--port", type=int, default=8000, metavar="N",
-                      help="port to listen on (default 8000)")
+    p_ui.add_argument(
+        "--host",
+        default="127.0.0.1",
+        metavar="ADDR",
+        help="address to bind (default 127.0.0.1). The dashboard has no "
+        "authentication and /api/status reports your configuration, so "
+        "binding publicly exposes it; guided ingest is disabled if you do",
+    )
+    p_ui.add_argument(
+        "--port", type=int, default=8000, metavar="N", help="port to listen on (default 8000)"
+    )
     _add_common(p_ui)
     p_ui.set_defaults(func=cmd_ui)
 
     p_mcp = sub.add_parser("mcp", help="serve the knowledge graph over MCP (stdio)")
     mcp_sub = p_mcp.add_subparsers(dest="mcp_command")
     p_mcp_install = mcp_sub.add_parser(
-        "install", help="register graphforge with an MCP client (no password is written)")
+        "install", help="register graphforge with an MCP client (no password is written)"
+    )
     p_mcp_install.add_argument(
-        "--client", choices=["claude-code", "claude-desktop", "cursor", "all"],
-        help="which client to write to (default: every client we know about)")
-    p_mcp_install.add_argument("--remove", action="store_true",
-                               help="remove the entry instead of adding it")
-    p_mcp_install.add_argument("--dry-run", action="store_true",
-                               help="print what would be written and exit")
+        "--client",
+        choices=["claude-code", "claude-desktop", "cursor", "all"],
+        help="which client to write to (default: every client we know about)",
+    )
+    p_mcp_install.add_argument(
+        "--remove", action="store_true", help="remove the entry instead of adding it"
+    )
+    p_mcp_install.add_argument(
+        "--dry-run", action="store_true", help="print what would be written and exit"
+    )
     _add_common(p_mcp_install)
     p_mcp_install.set_defaults(func=cmd_mcp_install)
     _add_common(p_mcp)
     p_mcp.set_defaults(func=cmd_mcp)
 
     p_doctor = sub.add_parser(
-        "doctor", help="check the install, the connection, and the graph, and say how to fix it")
+        "doctor", help="check the install, the connection, and the graph, and say how to fix it"
+    )
     _add_common(p_doctor)
     p_doctor.set_defaults(func=cmd_doctor)
 
     p_quick = sub.add_parser(
-        "quickstart", help="guided first run: configure, connect, ingest, and wire up MCP")
-    p_quick.add_argument("--yes", action="store_true",
-                         help="take defaults and never prompt (for scripts and CI)")
-    p_quick.add_argument("--repo", metavar="PATH|URL", default="",
-                         help="repository to ingest, instead of being asked")
-    p_quick.add_argument("--db-url", dest="db_url", metavar="URL", default="",
-                         help="database URL to ingest, instead of being asked")
+        "quickstart", help="guided first run: configure, connect, ingest, and wire up MCP"
+    )
+    p_quick.add_argument(
+        "--yes", action="store_true", help="take defaults and never prompt (for scripts and CI)"
+    )
+    p_quick.add_argument(
+        "--repo",
+        metavar="PATH|URL",
+        default="",
+        help="repository to ingest, instead of being asked",
+    )
+    p_quick.add_argument(
+        "--db-url",
+        dest="db_url",
+        metavar="URL",
+        default="",
+        help="database URL to ingest, instead of being asked",
+    )
     _add_common(p_quick)
     p_quick.set_defaults(func=cmd_quickstart)
 
     p_search = sub.add_parser("search", help="search code and/or schema nodes in the graph")
-    p_search.add_argument("query", nargs="?", default="",
-                          help="substring to match (case-insensitive)")
-    p_search.add_argument("--kind", choices=["code", "schema", "all"], default="code",
-                          help="code = File/Class/Method (default); schema = Table/Column/StoredProcedure")
-    p_search.add_argument("--repo", default="", metavar="NAME",
-                          help="limit hits to one repository name")
-    p_search.add_argument("--limit", type=int, default=25, metavar="N",
-                          help="maximum hits to print (default 25)")
+    p_search.add_argument(
+        "query", nargs="?", default="", help="substring to match (case-insensitive)"
+    )
+    p_search.add_argument(
+        "--kind",
+        choices=["code", "schema", "all"],
+        default="code",
+        help="code = File/Class/Method (default); schema = Table/Column/StoredProcedure",
+    )
+    p_search.add_argument(
+        "--repo", default="", metavar="NAME", help="limit hits to one repository name"
+    )
+    p_search.add_argument(
+        "--limit", type=int, default=25, metavar="N", help="maximum hits to print (default 25)"
+    )
     _add_common(p_search)
     p_search.set_defaults(func=cmd_search)
 

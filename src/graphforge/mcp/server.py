@@ -26,6 +26,7 @@ The graph-query logic lives in :class:`GraphQuery` (driver in, dicts out) so it
 can be unit-tested without the MCP runtime. The ``mcp`` package is imported
 lazily, only when the server is actually started.
 """
+
 from __future__ import annotations
 
 import json
@@ -91,8 +92,13 @@ def _plural(count: int, singular: str, plural: str | None = None) -> str:
 
 def _page(rows: list[dict], total: int, limit: int, offset: int) -> dict:
     """Wrap a slice of rows with the metadata a paging client needs."""
-    return {"rows": rows, "total": int(total), "limit": int(limit), "offset": int(offset),
-            "hasMore": (int(offset) + len(rows)) < int(total)}
+    return {
+        "rows": rows,
+        "total": int(total),
+        "limit": int(limit),
+        "offset": int(offset),
+        "hasMore": (int(offset) + len(rows)) < int(total),
+    }
 
 
 def _clamp_limit(limit: int) -> int:
@@ -113,7 +119,9 @@ def _clean_rows(rows: list[dict] | None, *keys: str) -> list[dict]:
     """Drop the all-null placeholder maps Cypher's ``collect()`` yields on OPTIONAL MATCH."""
     out = []
     for row in rows or []:
-        if isinstance(row, dict) and any(row.get(k) not in (None, "") for k in (keys or tuple(row))):
+        if isinstance(row, dict) and any(
+            row.get(k) not in (None, "") for k in (keys or tuple(row))
+        ):
             out.append(row)
     return out
 
@@ -121,10 +129,15 @@ def _clean_rows(rows: list[dict] | None, *keys: str) -> list[dict]:
 class GraphQuery:
     """Thin, read-focused query helper over a Neo4j driver."""
 
-    def __init__(self, driver, database: str = "neo4j", *,
-                 schema_ttl: float = DEFAULT_SCHEMA_TTL,
-                 clock: Callable[[], float] | None = None,
-                 cache_key: tuple | None = None):
+    def __init__(
+        self,
+        driver,
+        database: str = "neo4j",
+        *,
+        schema_ttl: float = DEFAULT_SCHEMA_TTL,
+        clock: Callable[[], float] | None = None,
+        cache_key: tuple | None = None,
+    ):
         self.driver = driver
         self.database = database
         #: Default staleness window for :meth:`get_schema`, in seconds.
@@ -143,21 +156,26 @@ class GraphQuery:
 
         driver = GraphDatabase.driver(settings.uri, auth=(settings.user, settings.password))
         driver.verify_connectivity()
-        return cls(driver, settings.database,
-                   cache_key=("neo4j", settings.uri, settings.user, settings.database))
+        return cls(
+            driver,
+            settings.database,
+            cache_key=("neo4j", settings.uri, settings.user, settings.database),
+        )
 
     def close(self) -> None:
         self.driver.close()
 
     # -- primitives --------------------------------------------------------
-    def _read(self, cypher: str, params: dict[str, Any] | None = None,
-              timeout: float | None = None) -> list[dict]:
+    def _read(
+        self, cypher: str, params: dict[str, Any] | None = None, timeout: float | None = None
+    ) -> list[dict]:
         def _work(tx):
             result = tx.run(cypher, params or {})
             return [r.data() for r in result]
 
         if timeout is not None:
             from neo4j import unit_of_work
+
             _work = unit_of_work(timeout=timeout)(_work)
 
         with self.driver.session(database=self.database) as session:
@@ -217,8 +235,12 @@ class GraphQuery:
 
     def _load_schema(self) -> dict:
         labels = [r["label"] for r in self._read("CALL db.labels() YIELD label RETURN label")]
-        rels = [r["relationshipType"] for r in
-                self._read("CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType")]
+        rels = [
+            r["relationshipType"]
+            for r in self._read(
+                "CALL db.relationshipTypes() YIELD relationshipType RETURN relationshipType"
+            )
+        ]
         counts = {}
         for label in labels:
             rec = self._read(f"MATCH (n:`{label}`) RETURN count(n) AS c")
@@ -230,11 +252,17 @@ class GraphQuery:
         for rel in rels:
             rec = self._read(f"MATCH ()-[r:`{rel}`]->() RETURN count(r) AS c")
             rel_counts[rel] = rec[0]["c"] if rec else 0
-        return {"labels": labels, "relationshipTypes": rels, "nodeCountsByLabel": counts,
-                "relationshipCountsByType": rel_counts}
+        return {
+            "labels": labels,
+            "relationshipTypes": rels,
+            "nodeCountsByLabel": counts,
+            "relationshipCountsByType": rel_counts,
+        }
 
     # -- tools -------------------------------------------------------------
-    def read_cypher(self, query: str, params: dict[str, Any] | None = None, limit: int = 200) -> list[dict]:
+    def read_cypher(
+        self, query: str, params: dict[str, Any] | None = None, limit: int = 200
+    ) -> list[dict]:
         from ..query_guard import (
             READ_TX_TIMEOUT_SECONDS,
             check_read_query,
@@ -258,8 +286,9 @@ class GraphQuery:
         # CALL is a syntax error with one appended, so it is capped here.
         return rows[:limit]
 
-    def search_nodes(self, label: str, prop: str, value: str, limit: int = 25,
-                     offset: int = 0) -> list[dict]:
+    def search_nodes(
+        self, label: str, prop: str, value: str, limit: int = 25, offset: int = 0
+    ) -> list[dict]:
         """Substring-search one property of one label. Returns a plain list of rows."""
         if not _IDENT.fullmatch(label) or not _IDENT.fullmatch(prop):
             raise ValueError("label and prop must be simple identifiers")
@@ -267,11 +296,13 @@ class GraphQuery:
             f"MATCH (n:`{label}`) WHERE toString(n.`{prop}`) CONTAINS $value "
             "RETURN n " + _PAGE_ORDER + "SKIP $offset LIMIT $limit"
         )
-        return self._read(cypher, {"value": value, "limit": _clamp_limit(limit),
-                                   "offset": _clamp_offset(offset)})
+        return self._read(
+            cypher, {"value": value, "limit": _clamp_limit(limit), "offset": _clamp_offset(offset)}
+        )
 
-    def search_nodes_page(self, label: str, prop: str, value: str, limit: int = 25,
-                          offset: int = 0) -> dict:
+    def search_nodes_page(
+        self, label: str, prop: str, value: str, limit: int = 25, offset: int = 0
+    ) -> dict:
         """:meth:`search_nodes` plus ``total`` / ``hasMore`` (one extra count query)."""
         if not _IDENT.fullmatch(label) or not _IDENT.fullmatch(prop):
             raise ValueError("label and prop must be simple identifiers")
@@ -279,7 +310,9 @@ class GraphQuery:
         rows = self.search_nodes(label, prop, value, limit, offset)
         total = self._count(
             f"MATCH (n:`{label}`) WHERE toString(n.`{prop}`) CONTAINS $value "
-            "RETURN count(n) AS total", {"value": value})
+            "RETURN count(n) AS total",
+            {"value": value},
+        )
         return _page(rows, total, limit, offset)
 
     def node_neighbors(self, node_id: str, limit: int = 50) -> list[dict]:
@@ -317,8 +350,7 @@ class GraphQuery:
             "n.repo AS repo "
         ),
         "schema": (
-            "RETURN labels(n) AS labels, n.name AS name, "
-            "n.database AS database, n.table AS table "
+            "RETURN labels(n) AS labels, n.name AS name, n.database AS database, n.table AS table "
         ),
         "all": (
             "RETURN labels(n) AS labels, n.name AS name, "
@@ -339,8 +371,9 @@ class GraphQuery:
             where += "AND n.repo = $repo "
         return where
 
-    def search_codebase(self, text: str, kind: str = "code", repo: str = "",
-                        limit: int = 25, offset: int = 0) -> dict:
+    def search_codebase(
+        self, text: str, kind: str = "code", repo: str = "", limit: int = 25, offset: int = 0
+    ) -> dict:
         """Case-insensitive codebase / schema search, paged.
 
         ``kind`` is ``code`` (File / Class / Method), ``schema`` (Table / Column /
@@ -357,8 +390,8 @@ class GraphQuery:
         if repo:
             params["repo"] = repo
         rows = self._read(
-            where + self._SEARCH_RETURN[kind] + _PAGE_ORDER + "SKIP $offset LIMIT $limit",
-            params)
+            where + self._SEARCH_RETURN[kind] + _PAGE_ORDER + "SKIP $offset LIMIT $limit", params
+        )
         count_params: dict[str, Any] = {"t": text}
         if repo:
             count_params["repo"] = repo
@@ -377,12 +410,14 @@ class GraphQuery:
 
     def find_table(self, text: str, limit: int = 25, offset: int = 0) -> list[dict]:
         cypher = (
-            self._FIND_TABLE_WHERE +
-            "RETURN labels(n) AS labels, n.name AS name, n.table AS table, n.database AS database "
-            + _PAGE_ORDER + "SKIP $offset LIMIT $limit"
+            self._FIND_TABLE_WHERE
+            + "RETURN labels(n) AS labels, n.name AS name, n.table AS table, n.database AS database "
+            + _PAGE_ORDER
+            + "SKIP $offset LIMIT $limit"
         )
-        return self._read(cypher, {"t": text, "limit": _clamp_limit(limit),
-                                   "offset": _clamp_offset(offset)})
+        return self._read(
+            cypher, {"t": text, "limit": _clamp_limit(limit), "offset": _clamp_offset(offset)}
+        )
 
     def find_table_page(self, text: str, limit: int = 25, offset: int = 0) -> dict:
         """:meth:`find_table` plus ``total`` / ``hasMore``."""
@@ -406,27 +441,42 @@ class GraphQuery:
         cols = self._read(
             "MATCH (c:Column) WHERE toLower(c.name) CONTAINS toLower($col) "
             "RETURN c.database AS database, c.table AS table, c.name AS column, "
-            "c.dataType AS dataType ORDER BY c.database, c.table", {"col": column})
+            "c.dataType AS dataType ORDER BY c.database, c.table",
+            {"col": column},
+        )
         fks = self._read(
             "MATCH (c1:Column)-[:FOREIGN_KEY]->(c2:Column) "
             "WHERE toLower(c1.name) CONTAINS toLower($col) OR toLower(c2.name) CONTAINS toLower($col) "
             "RETURN c1.table AS fromTable, c1.name AS fromColumn, "
-            "c2.table AS toTable, c2.name AS toColumn", {"col": column})
+            "c2.table AS toTable, c2.name AS toColumn",
+            {"col": column},
+        )
         indexes = self._read(
             "MATCH (i:Index) WHERE any(x IN i.columns WHERE toLower(x) CONTAINS toLower($col)) "
             "RETURN i.database AS database, i.table AS table, i.name AS name, "
-            "i.columns AS columns, i.isUnique AS isUnique", {"col": column})
+            "i.columns AS columns, i.isUnique AS isUnique",
+            {"col": column},
+        )
         procs = self._read(
             "MATCH (p:StoredProcedure) WHERE p.definition IS NOT NULL "
             "AND toLower(p.definition) CONTAINS toLower($col) "
             "RETURN p.database AS database, p.name AS procedure "
-            "ORDER BY p.database, p.name", {"col": column})
+            "ORDER BY p.database, p.name",
+            {"col": column},
+        )
         views = self._read(
             "MATCH (v:View) WHERE v.definition IS NOT NULL "
             "AND toLower(v.definition) CONTAINS toLower($col) "
-            "RETURN v.database AS database, v.name AS view", {"col": column})
-        return {"columns": cols, "foreignKeys": fks, "indexes": indexes,
-                "storedProcedures": procs, "views": views}
+            "RETURN v.database AS database, v.name AS view",
+            {"col": column},
+        )
+        return {
+            "columns": cols,
+            "foreignKeys": fks,
+            "indexes": indexes,
+            "storedProcedures": procs,
+            "views": views,
+        }
 
     # -- higher-level reports ---------------------------------------------
     def _impact_of_table(self, table: str) -> dict:
@@ -434,27 +484,42 @@ class GraphQuery:
         cols = self._read(
             "MATCH (c:Column) WHERE toLower(c.table) = toLower($t) "
             "RETURN c.database AS database, c.table AS table, c.name AS column, "
-            "c.dataType AS dataType ORDER BY c.database, c.name", {"t": table})
+            "c.dataType AS dataType ORDER BY c.database, c.name",
+            {"t": table},
+        )
         fks = self._read(
             "MATCH (c1:Column)-[:FOREIGN_KEY]->(c2:Column) "
             "WHERE toLower(c1.table) = toLower($t) OR toLower(c2.table) = toLower($t) "
             "RETURN c1.table AS fromTable, c1.name AS fromColumn, "
-            "c2.table AS toTable, c2.name AS toColumn", {"t": table})
+            "c2.table AS toTable, c2.name AS toColumn",
+            {"t": table},
+        )
         indexes = self._read(
             "MATCH (i:Index) WHERE toLower(i.table) = toLower($t) "
             "RETURN i.database AS database, i.table AS table, i.name AS name, "
-            "i.columns AS columns, i.isUnique AS isUnique", {"t": table})
+            "i.columns AS columns, i.isUnique AS isUnique",
+            {"t": table},
+        )
         procs = self._read(
             "MATCH (p:StoredProcedure) WHERE p.definition IS NOT NULL "
             "AND toLower(p.definition) CONTAINS toLower($t) "
             "RETURN p.database AS database, p.name AS procedure "
-            "ORDER BY p.database, p.name", {"t": table})
+            "ORDER BY p.database, p.name",
+            {"t": table},
+        )
         views = self._read(
             "MATCH (v:View) WHERE v.definition IS NOT NULL "
             "AND toLower(v.definition) CONTAINS toLower($t) "
-            "RETURN v.database AS database, v.name AS view", {"t": table})
-        return {"columns": cols, "foreignKeys": fks, "indexes": indexes,
-                "storedProcedures": procs, "views": views}
+            "RETURN v.database AS database, v.name AS view",
+            {"t": table},
+        )
+        return {
+            "columns": cols,
+            "foreignKeys": fks,
+            "indexes": indexes,
+            "storedProcedures": procs,
+            "views": views,
+        }
 
     def explain_impact(self, target: str, kind: str = "auto") -> dict:
         """Readable impact report for a column *or* table name.
@@ -484,7 +549,9 @@ class GraphQuery:
         tables = self._read(
             "MATCH (t:Table) WHERE toLower(t.name) = toLower($target) "
             "RETURN t.database AS database, t.schema AS schema, t.name AS name "
-            "ORDER BY t.database, t.schema", {"target": target})
+            "ORDER BY t.database, t.schema",
+            {"target": target},
+        )
         if kind == "auto":
             kind = "table" if tables else "column"
 
@@ -508,7 +575,9 @@ class GraphQuery:
                 "MATCH (p:StoredProcedure)-[:USES_TABLE]->(t:Table) "
                 "WHERE toLower(t.name) IN $tables "
                 "RETURN 'StoredProcedure' AS kind, p.database AS database, p.name AS name, "
-                "t.name AS table", {"tables": table_names})
+                "t.name AS table",
+                {"tables": table_names},
+            )
             entities = self._read(
                 "MATCH (e:Class) WHERE toLower(coalesce(e.mappedTable, '')) IN $tables "
                 "RETURN e.repo AS repo, e.fqn AS entity, e.name AS name, "
@@ -516,21 +585,30 @@ class GraphQuery:
                 "UNION "
                 "MATCH (e:Class)-[:MAPS_TO]->(t:Table) WHERE toLower(t.name) IN $tables "
                 "RETURN e.repo AS repo, e.fqn AS entity, e.name AS name, "
-                "t.name AS table, 'MAPS_TO' AS via", {"tables": table_names})
+                "t.name AS table, 'MAPS_TO' AS via",
+                {"tables": table_names},
+            )
 
         views = _merge_evidence(base["views"], "view", linked, "View")
         procs = _merge_evidence(base["storedProcedures"], "procedure", linked, "StoredProcedure")
 
-        direct = {"tables": tables, "columns": base["columns"],
-                  "foreignKeys": base["foreignKeys"], "indexes": base["indexes"]}
+        direct = {
+            "tables": tables,
+            "columns": base["columns"],
+            "foreignKeys": base["foreignKeys"],
+            "indexes": base["indexes"],
+        }
         transitive = {"views": views, "storedProcedures": procs, "entities": entities}
-        counts = {key: len(rows) for key, rows in
-                  list(direct.items()) + list(transitive.items())}
+        counts = {key: len(rows) for key, rows in list(direct.items()) + list(transitive.items())}
         counts["direct"] = sum(len(rows) for rows in direct.values())
         counts["transitive"] = sum(len(rows) for rows in transitive.values())
         return {
-            "target": target, "kind": kind, "tables": table_names,
-            "direct": direct, "transitive": transitive, "counts": counts,
+            "target": target,
+            "kind": kind,
+            "tables": table_names,
+            "direct": direct,
+            "transitive": transitive,
+            "counts": counts,
             "summary": _impact_summary(target, kind, table_names, counts),
         }
 
@@ -571,7 +649,9 @@ class GraphQuery:
             "count(DISTINCT importerFile) AS importers "
             "WHERE importers = 0 "
             "RETURN f.path AS path, f.repo AS repo, lastChanged, classes "
-            "ORDER BY lastChanged, path LIMIT $limit", params)
+            "ORDER BY lastChanged, path LIMIT $limit",
+            params,
+        )
 
         classes = self._read(
             "MATCH (f:File)-[:CONTAINS_CLASS]->(cls:Class) "
@@ -586,7 +666,9 @@ class GraphQuery:
             "WHERE importers = 0 "
             "RETURN cls.fqn AS fqn, cls.name AS name, f.path AS path, "
             "coalesce(cls.repo, f.repo) AS repo, lastChanged, cls.language AS language "
-            "ORDER BY lastChanged, fqn LIMIT $limit", params)
+            "ORDER BY lastChanged, fqn LIMIT $limit",
+            params,
+        )
 
         files = [_normalise_last_changed(r) for r in files]
         classes = [_normalise_last_changed(r) for r in classes]
@@ -596,9 +678,16 @@ class GraphQuery:
             f"{_plural(counts['classes'], 'class', 'classes')} untouched since {cutoff} "
             f"({days}d) with no in-repo importer — candidates for review, not deletion."
         )
-        return {"repo": repo, "days": days, "cutoff": cutoff, "files": files,
-                "classes": classes, "counts": counts, "summary": summary,
-                "caveat": DEAD_CODE_CAVEAT}
+        return {
+            "repo": repo,
+            "days": days,
+            "cutoff": cutoff,
+            "files": files,
+            "classes": classes,
+            "counts": counts,
+            "summary": summary,
+            "caveat": DEAD_CODE_CAVEAT,
+        }
 
     def blast_radius_of_file(self, path: str) -> dict:
         """What breaks if `path` changes: its classes, their methods, and their callers.
@@ -621,7 +710,9 @@ class GraphQuery:
             "collect(DISTINCT {name: m.name, visibility: m.visibility, line: m.lineNumber}) AS methods, "
             "collect(DISTINCT {file: callerFile.path, class: caller.fqn, repo: caller.repo}) "
             "AS callers "
-            "ORDER BY class", {"path": path})
+            "ORDER BY class",
+            {"path": path},
+        )
 
         classes: list[dict] = []
         caller_files: dict[str, dict] = {}
@@ -634,29 +725,47 @@ class GraphQuery:
             method_count += len(methods)
             for caller in callers:
                 key = str(caller.get("file") or caller.get("class"))
-                caller_files.setdefault(key, {"file": caller.get("file"),
-                                              "repo": caller.get("repo"), "classes": []})
+                caller_files.setdefault(
+                    key, {"file": caller.get("file"), "repo": caller.get("repo"), "classes": []}
+                )
                 if caller.get("class") and caller["class"] not in caller_files[key]["classes"]:
                     caller_files[key]["classes"].append(caller["class"])
-            classes.append({"class": row["class"], "name": row.get("className"),
-                            "language": row.get("language"), "methods": methods,
-                            "callers": callers})
+            classes.append(
+                {
+                    "class": row["class"],
+                    "name": row.get("className"),
+                    "language": row.get("language"),
+                    "methods": methods,
+                    "callers": callers,
+                }
+            )
 
         found = bool(rows)
         repo = rows[0].get("repo") if rows else None
-        counts = {"classes": len(classes), "methods": method_count,
-                  "callerFiles": len(caller_files)}
+        counts = {
+            "classes": len(classes),
+            "methods": method_count,
+            "callerFiles": len(caller_files),
+        }
         if not found:
-            summary = f"No :File node matches {path!r} — check the path (it is stored repo-relative)."
+            summary = (
+                f"No :File node matches {path!r} — check the path (it is stored repo-relative)."
+            )
         else:
             summary = (
                 f"{path}: {_plural(counts['classes'], 'class', 'classes')} declaring "
                 f"{_plural(counts['methods'], 'method')}, referenced by "
                 f"{_plural(counts['callerFiles'], 'file')}."
             )
-        return {"file": path, "found": found, "repo": repo, "classes": classes,
-                "callers": sorted(caller_files.values(), key=lambda c: str(c.get("file") or "")),
-                "counts": counts, "summary": summary}
+        return {
+            "file": path,
+            "found": found,
+            "repo": repo,
+            "classes": classes,
+            "callers": sorted(caller_files.values(), key=lambda c: str(c.get("file") or "")),
+            "counts": counts,
+            "summary": summary,
+        }
 
 
 def _normalise_last_changed(row: dict) -> dict:
@@ -667,40 +776,53 @@ def _normalise_last_changed(row: dict) -> dict:
     return out
 
 
-def _merge_evidence(text_rows: list[dict], name_key: str,
-                    linked: list[dict], kind: str) -> list[dict]:
+def _merge_evidence(
+    text_rows: list[dict], name_key: str, linked: list[dict], kind: str
+) -> list[dict]:
     """Fold text matches and link-pass edges into one list, recording how each was found."""
     merged: dict[tuple, dict] = {}
     for row in text_rows or []:
         key = (row.get("database"), row.get(name_key))
-        merged[key] = {"database": row.get("database"), name_key: row.get(name_key),
-                       "via": ["definition"]}
+        merged[key] = {
+            "database": row.get("database"),
+            name_key: row.get(name_key),
+            "via": ["definition"],
+        }
     for row in linked or []:
         if row.get("kind") != kind:
             continue
         key = (row.get("database"), row.get("name"))
-        entry = merged.setdefault(key, {"database": row.get("database"),
-                                        name_key: row.get("name"), "via": []})
+        entry = merged.setdefault(
+            key, {"database": row.get("database"), name_key: row.get("name"), "via": []}
+        )
         if "link" not in entry["via"]:
             entry["via"].append("link")
-    return sorted(merged.values(), key=lambda r: (str(r.get("database") or ""), str(r.get(name_key) or "")))
+    return sorted(
+        merged.values(), key=lambda r: (str(r.get("database") or ""), str(r.get(name_key) or ""))
+    )
 
 
 def _impact_summary(target: str, kind: str, tables: list[str], counts: dict[str, int]) -> str:
     where = f" across {_plural(len(tables), 'table')}" if tables else ""
-    direct = ", ".join([
-        _plural(counts.get("columns", 0), "column"),
-        _plural(counts.get("foreignKeys", 0), "foreign key"),
-        _plural(counts.get("indexes", 0), "index", "indexes"),
-    ])
-    transitive = ", ".join([
-        _plural(counts.get("views", 0), "view"),
-        _plural(counts.get("storedProcedures", 0), "stored procedure"),
-        _plural(counts.get("entities", 0), "JPA entity", "JPA entities"),
-    ])
-    return (f"{target} ({kind}){where}: direct impact — {direct}; "
-            f"transitive impact — {transitive}. Transitive hits found by text match "
-            f"need review; they can be false positives.")
+    direct = ", ".join(
+        [
+            _plural(counts.get("columns", 0), "column"),
+            _plural(counts.get("foreignKeys", 0), "foreign key"),
+            _plural(counts.get("indexes", 0), "index", "indexes"),
+        ]
+    )
+    transitive = ", ".join(
+        [
+            _plural(counts.get("views", 0), "view"),
+            _plural(counts.get("storedProcedures", 0), "stored procedure"),
+            _plural(counts.get("entities", 0), "JPA entity", "JPA entities"),
+        ]
+    )
+    return (
+        f"{target} ({kind}){where}: direct impact — {direct}; "
+        f"transitive impact — {transitive}. Transitive hits found by text match "
+        f"need review; they can be false positives."
+    )
 
 
 class LazyGraph:
@@ -741,6 +863,7 @@ class LazyGraph:
             with self._lock:
                 if self._graph is None:
                     from ..core.errors import neo4j_advice
+
                     try:
                         self._graph = GraphQuery.connect(self._settings)
                     except Exception as exc:
@@ -820,8 +943,9 @@ def build_server(settings: Neo4jSettings | None = None, graph: Any = None):
         return _json(gq.find_code_page(text, limit, offset))
 
     @server.tool()
-    def search_codebase(text: str, kind: str = "code", repo: str = "",
-                        limit: int = 25, offset: int = 0) -> str:
+    def search_codebase(
+        text: str, kind: str = "code", repo: str = "", limit: int = 25, offset: int = 0
+    ) -> str:
         """Search the graph for code and/or schema nodes matching `text`.
 
         Case-insensitive. `kind` is 'code' (File / Class / Method; the default),

@@ -1,4 +1,5 @@
 """Layers 2–4 of the read-query gate: no connection is opened for a denial."""
+
 from __future__ import annotations
 
 import pytest
@@ -64,9 +65,16 @@ MUST_ALLOW = [
 
 
 def test_allowlist_is_frozen_and_tiny():
-    assert frozenset({
-        "db.labels", "db.relationshiptypes", "db.propertykeys",
-    }) == READ_PROCEDURES
+    assert (
+        frozenset(
+            {
+                "db.labels",
+                "db.relationshiptypes",
+                "db.propertykeys",
+            }
+        )
+        == READ_PROCEDURES
+    )
 
 
 def test_must_reject_is_denied_without_touching_the_driver():
@@ -92,8 +100,8 @@ def test_ui_must_reject_opens_no_connection():
     for cypher in MUST_REJECT:
         spy = _Spy()
         code, payload = ui.route(
-            "/api/query", "", {"cypher": cypher}, _settings(),
-            method="POST", connect=spy)
+            "/api/query", "", {"cypher": cypher}, _settings(), method="POST", connect=spy
+        )
         assert code == 400, cypher
         assert payload.get("error")
         assert spy.connections == 0, cypher

@@ -15,6 +15,7 @@ Bucketing rules:
     ``class X(Protocol)`` / ``ABC`` -> ``interfaces``
     everything else                 -> ``classes``
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -43,8 +44,14 @@ _STEREOTYPES = {"dataclass": "DataClass", "define": "DataClass", "attrs": "DataC
 def extract(lines: list[str]) -> dict[str, Any]:
     """Return the structural summary of a Python source file. Never raises."""
     result: dict[str, Any] = {
-        "package": "", "imports": [], "classes": [], "interfaces": [],
-        "enums": [], "methods": [], "annotations": [], "docstring": "",
+        "package": "",
+        "imports": [],
+        "classes": [],
+        "interfaces": [],
+        "enums": [],
+        "methods": [],
+        "annotations": [],
+        "docstring": "",
     }
     # a malformed file must never abort a repo scan
     with contextlib.suppress(Exception):
@@ -56,8 +63,8 @@ def extract(lines: list[str]) -> dict[str, Any]:
 def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
     result["docstring"] = _module_docstring(lines)
 
-    pending: list[dict[str, str]] = []   # decorators awaiting a declaration
-    stack: list[dict[str, Any]] = []     # enclosing scopes, keyed by indent
+    pending: list[dict[str, str]] = []  # decorators awaiting a declaration
+    stack: list[dict[str, Any]] = []  # enclosing scopes, keyed by indent
 
     for lineno, code, raw, indent in _logical_lines(lines):
         while stack and indent <= stack[-1]["indent"]:
@@ -92,15 +99,17 @@ def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
 
         dfm = _DEF.match(code)
         if dfm:
-            result["methods"].append({
-                "name": dfm.group("name"),
-                "line": lineno,
-                "returnType": _return_type(code),
-                "visibility": _visibility(dfm.group("name")),
-                "isAsync": bool(dfm.group("async")),
-                "owner": owner,
-                "annotations": [d["name"] for d in pending],
-            })
+            result["methods"].append(
+                {
+                    "name": dfm.group("name"),
+                    "line": lineno,
+                    "returnType": _return_type(code),
+                    "visibility": _visibility(dfm.group("name")),
+                    "isAsync": bool(dfm.group("async")),
+                    "owner": owner,
+                    "annotations": [d["name"] for d in pending],
+                }
+            )
             stack.append(_scope(indent, dfm.group("name"), None, -1))
             pending = []
             continue
@@ -183,7 +192,7 @@ def _strip(raw: str, open_triple: str | None) -> tuple[str, str | None]:
         if ch == "#":
             break
         if raw.startswith('"""', i) or raw.startswith("'''", i):
-            open_triple = raw[i:i + 3]
+            open_triple = raw[i : i + 3]
             i += 3
             continue
         if ch in ("'", '"'):
@@ -212,17 +221,17 @@ def _module_docstring(lines: list[str]) -> str:
         if not m:
             return ""
         quote = m.group("q")
-        body = stripped[m.end():]
+        body = stripped[m.end() :]
         end = body.find(quote)
         return (body if end == -1 else body[:end]).strip()
     return ""
 
 
 # ---- declaration helpers --------------------------------------------------
-def _scope(indent: int, name: str, bucket: str | None, index: int,
-           outer: dict[str, Any] | None = None) -> dict[str, Any]:
-    return {"indent": indent, "name": name, "bucket": bucket,
-            "index": index, "outer": outer}
+def _scope(
+    indent: int, name: str, bucket: str | None, index: int, outer: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    return {"indent": indent, "name": name, "bucket": bucket, "index": index, "outer": outer}
 
 
 def _nearest_type(stack: list[dict[str, Any]]) -> str:
@@ -234,11 +243,11 @@ def _nearest_type(stack: list[dict[str, Any]]) -> str:
 
 def _visibility(name: str) -> str:
     if name.startswith("__") and name.endswith("__"):
-        return "public"          # dunder protocol methods are part of the API
+        return "public"  # dunder protocol methods are part of the API
     if name.startswith("__"):
-        return "private"         # name-mangled
+        return "private"  # name-mangled
     if name.startswith("_"):
-        return "protected"       # conventionally internal
+        return "protected"  # conventionally internal
     return "public"
 
 
@@ -333,7 +342,7 @@ def _return_type(code: str) -> str:
         return ""
     depth = 0
     out: list[str] = []
-    for ch in code[m.end():]:
+    for ch in code[m.end() :]:
         if ch in "([{":
             depth += 1
         elif ch in ")]}":
@@ -352,8 +361,14 @@ def _plain_imports(body: str, line: int) -> list[dict[str, Any]]:
         fqn = chunk[0].strip()
         if not fqn:
             continue
-        out.append({"fqn": fqn, "line": line, "kind": "import",
-                    "alias": chunk[1].strip() if len(chunk) > 1 else ""})
+        out.append(
+            {
+                "fqn": fqn,
+                "line": line,
+                "kind": "import",
+                "alias": chunk[1].strip() if len(chunk) > 1 else "",
+            }
+        )
     return out
 
 
@@ -369,6 +384,12 @@ def _from_imports(match: re.Match, line: int) -> list[dict[str, Any]]:
         if not name:
             continue
         sep = "" if module.endswith(".") else "."
-        out.append({"fqn": f"{module}{sep}{name}", "line": line, "kind": "from",
-                    "alias": chunk[1].strip() if len(chunk) > 1 else ""})
+        out.append(
+            {
+                "fqn": f"{module}{sep}{name}",
+                "line": line,
+                "kind": "from",
+                "alias": chunk[1].strip() if len(chunk) > 1 else "",
+            }
+        )
     return out

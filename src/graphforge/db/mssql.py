@@ -1,18 +1,28 @@
 """Microsoft SQL Server schema extractor (via pyodbc)."""
+
 from __future__ import annotations
 
 from .base import SchemaExtractor
 
 _SYSTEM_SCHEMAS = {
-    "sys", "INFORMATION_SCHEMA", "guest", "db_owner", "db_accessadmin",
-    "db_securityadmin", "db_ddladmin", "db_backupoperator", "db_datareader",
-    "db_datawriter", "db_denydatareader", "db_denydatawriter",
+    "sys",
+    "INFORMATION_SCHEMA",
+    "guest",
+    "db_owner",
+    "db_accessadmin",
+    "db_securityadmin",
+    "db_ddladmin",
+    "db_backupoperator",
+    "db_datareader",
+    "db_datawriter",
+    "db_denydatareader",
+    "db_denydatawriter",
 }
 
 
 class MssqlExtractor(SchemaExtractor):
     engine = "mssql"
-    placeholder = "?"                 # pyodbc paramstyle
+    placeholder = "?"  # pyodbc paramstyle
     default_schema_is_database = False
 
     def connect(self, database: str):
@@ -68,7 +78,8 @@ class MssqlExtractor(SchemaExtractor):
     def map_index(self, row: dict) -> dict:
         cols = row.get("columns") or ""
         return {
-            "name": row["name"], "table": row["table_name"],
+            "name": row["name"],
+            "table": row["table_name"],
             "isUnique": bool(row.get("is_unique")),
             "indexType": row.get("index_type", ""),
             "columns": [c for c in cols.split(",") if c],

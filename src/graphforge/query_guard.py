@@ -13,6 +13,7 @@ on ``n.name = 'CREATE'`` and ``:Create``). Layers:
 
 A denied query must not open a connection (layers 1–3 run first).
 """
+
 from __future__ import annotations
 
 import re
@@ -20,11 +21,13 @@ import re
 from .core.neo4j_writer import _split_statements
 
 #: Procedures ``read_cypher`` / ``POST /api/query`` may invoke. Unknown = denied.
-READ_PROCEDURES = frozenset({
-    "db.labels",
-    "db.relationshiptypes",
-    "db.propertykeys",
-})
+READ_PROCEDURES = frozenset(
+    {
+        "db.labels",
+        "db.relationshiptypes",
+        "db.propertykeys",
+    }
+)
 
 MAX_QUERY_CHARS = 8000
 MAX_READ_LIMIT = 500
@@ -126,8 +129,7 @@ def mask_query(cypher: str) -> str:
     outside the guard use this to reason about a query without re-parsing it.
     """
     kept = _mask_literals(cypher, backticks="keep")
-    unquoted = _CALL_QUOTED_TARGET.sub(
-        lambda m: m.group(1) + m.group(2).replace("`", " "), kept)
+    unquoted = _CALL_QUOTED_TARGET.sub(lambda m: m.group(1) + m.group(2).replace("`", " "), kept)
     return _mask_literals(unquoted, backticks="blank")
 
 
@@ -221,7 +223,7 @@ def _skip_backtick(text: str, i: int, out: list[str], *, keep: bool) -> int:
     i += 1
     while i < len(text):
         if text[i] == "`" and i + 1 < len(text) and text[i + 1] == "`":
-            out.extend(text[i:i + 2] if keep else "  ")
+            out.extend(text[i : i + 2] if keep else "  ")
             i += 2
             continue
         if text[i] == "`":

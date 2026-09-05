@@ -29,7 +29,9 @@ def test_dry_run_counts_only():
 def test_apply_schema_emit(tmp_path):
     out = tmp_path / "s.cypher"
     with Neo4jWriter(settings=None, emit_path=str(out)) as w:
-        n = w.apply_schema("CREATE CONSTRAINT a IF NOT EXISTS FOR (x:X) REQUIRE x.id IS UNIQUE;\n"
-                           "CREATE INDEX b IF NOT EXISTS FOR (x:X) ON (x.name);")
+        n = w.apply_schema(
+            "CREATE CONSTRAINT a IF NOT EXISTS FOR (x:X) REQUIRE x.id IS UNIQUE;\n"
+            "CREATE INDEX b IF NOT EXISTS FOR (x:X) ON (x.name);"
+        )
     assert n == 2
     assert "CONSTRAINT" in out.read_text()

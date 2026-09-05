@@ -6,6 +6,7 @@ a best-effort list of methods, and — for knowledge-graph enrichment —
 per-class annotations *with their arguments*, a framework **stereotype**
 (Entity / ManagedBean / EJBBean), and the JPA **mappedTable** name.
 """
+
 from __future__ import annotations
 
 import re
@@ -24,22 +25,42 @@ _METHOD = re.compile(
 )
 _ANNOTATION = re.compile(r"@(\w+)\s*(?:\((?P<args>.*?)\))?")
 _NAME_ARG = re.compile(r'(?:name\s*=\s*)?"([^"]+)"')
-_KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "new", "else",
-             "do", "synchronized", "try", "assert"}
+_KEYWORDS = {
+    "if",
+    "for",
+    "while",
+    "switch",
+    "catch",
+    "return",
+    "new",
+    "else",
+    "do",
+    "synchronized",
+    "try",
+    "assert",
+}
 
 # annotation simple-name -> semantic stereotype label
 _STEREOTYPES = {
     "Entity": "Entity",
-    "ManagedBean": "ManagedBean", "Named": "ManagedBean",
-    "Stateless": "EJBBean", "Stateful": "EJBBean", "Singleton": "EJBBean",
+    "ManagedBean": "ManagedBean",
+    "Named": "ManagedBean",
+    "Stateless": "EJBBean",
+    "Stateful": "EJBBean",
+    "Singleton": "EJBBean",
     "MessageDriven": "EJBBean",
 }
 
 
 def extract(lines: list[str]) -> dict[str, Any]:
     result: dict[str, Any] = {
-        "package": "", "imports": [], "classes": [], "interfaces": [],
-        "enums": [], "methods": [], "annotations": [],
+        "package": "",
+        "imports": [],
+        "classes": [],
+        "interfaces": [],
+        "enums": [],
+        "methods": [],
+        "annotations": [],
     }
     in_block_comment = False
     pending: list[dict[str, str]] = []  # annotations awaiting the next declaration
@@ -74,9 +95,11 @@ def extract(lines: list[str]) -> dict[str, Any]:
                 am = _ANNOTATION.match(line)
                 if not am:
                     break
-                pending.append({"name": am.group(1), "args": (am.group("args") or "").strip(), "line": str(i)})
+                pending.append(
+                    {"name": am.group(1), "args": (am.group("args") or "").strip(), "line": str(i)}
+                )
                 result["annotations"].append({"name": am.group(1), "line": i})
-                line = line[am.end():].strip()
+                line = line[am.end() :].strip()
             if not line:
                 continue  # annotations sat alone on their line
             # otherwise fall through: the rest of the line is a declaration
@@ -106,12 +129,14 @@ def extract(lines: list[str]) -> dict[str, Any]:
 
         mm = _METHOD.match(line)
         if mm and mm.group("name") not in _KEYWORDS and mm.group("ret").strip() not in _KEYWORDS:
-            result["methods"].append({
-                "name": mm.group("name"),
-                "line": i,
-                "returnType": mm.group("ret").strip(),
-                "visibility": _visibility(line),
-            })
+            result["methods"].append(
+                {
+                    "name": mm.group("name"),
+                    "line": i,
+                    "returnType": mm.group("ret").strip(),
+                    "visibility": _visibility(line),
+                }
+            )
         pending = []  # any other code line breaks the annotation→declaration binding
 
     return result

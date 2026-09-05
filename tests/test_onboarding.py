@@ -5,6 +5,7 @@
 the single most common first-run failure -- dumped a traceback and exited 1
 rather than the documented 2.
 """
+
 from __future__ import annotations
 
 import io
@@ -38,8 +39,9 @@ def _settings(password: str = "pw", uri: str = "bolt://127.0.0.1:7687") -> Setti
 
 # ------------------------------------------------------------ error advice --
 def test_a_driver_error_becomes_one_actionable_line():
-    advice = neo4j_advice(_named("ServiceUnavailable", "Couldn't connect to 127.0.0.1:9999"),
-                          _settings())
+    advice = neo4j_advice(
+        _named("ServiceUnavailable", "Couldn't connect to 127.0.0.1:9999"), _settings()
+    )
     assert advice is not None
     assert "cannot reach Neo4j at bolt://127.0.0.1:7687" in advice
     assert "docker compose up -d" in advice
@@ -50,8 +52,7 @@ def test_auth_and_database_failures_name_the_thing_to_change():
     auth = neo4j_advice(_named("AuthError", "authentication failure"), _settings())
     assert "NEO4J_PASSWORD" in auth
 
-    missing = neo4j_advice(
-        _named("ClientError", "database does not exist"), _settings())
+    missing = neo4j_advice(_named("ClientError", "database does not exist"), _settings())
     assert "NEO4J_DATABASE" in missing
 
 
@@ -62,6 +63,7 @@ def test_a_non_driver_exception_is_left_alone_to_be_raised():
 
 def test_main_turns_a_driver_error_into_exit_2(monkeypatch, capsys):
     """The contract is exit 2 for a user error; an uncaught exception exits 1."""
+
     def boom(_args):
         raise _named("ServiceUnavailable", "Couldn't connect to 127.0.0.1:9999")
 
@@ -76,6 +78,7 @@ def test_main_turns_a_driver_error_into_exit_2(monkeypatch, capsys):
 
 def test_an_unexpected_error_still_propagates(monkeypatch):
     """Only driver errors are translated; a real bug must not be swallowed."""
+
     def boom(_args):
         raise ZeroDivisionError("a genuine bug")
 
@@ -102,6 +105,7 @@ def test_a_configured_password_is_never_questioned():
 # -------------------------------------------------------------- the doctor --
 def test_doctor_reports_a_failure_without_raising(monkeypatch):
     """An unreachable graph is a finding on the report, never an exception."""
+
     def boom(_settings):
         raise _named("ServiceUnavailable", "Couldn't connect")
 
@@ -148,10 +152,15 @@ def test_install_writes_no_password_and_points_at_the_env_file(tmp_path):
 
 def test_install_merges_and_leaves_other_servers_alone(tmp_path):
     target = tmp_path / ".mcp.json"
-    target.write_text(json.dumps({
-        "mcpServers": {"other": {"command": "keepme"}},
-        "somethingElse": True,
-    }), encoding="utf-8")
+    target.write_text(
+        json.dumps(
+            {
+                "mcpServers": {"other": {"command": "keepme"}},
+                "somethingElse": True,
+            }
+        ),
+        encoding="utf-8",
+    )
 
     install.install(["claude-code"], None, project_dir=tmp_path)
     written = json.loads(target.read_text(encoding="utf-8"))

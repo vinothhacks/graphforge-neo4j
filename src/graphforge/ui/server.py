@@ -20,6 +20,7 @@ payload)`` out) so it can be unit-tested without sockets or a live database.
 Every endpoint validates its own input and re-applies the MCP write guard
 **server-side** — the browser is never trusted.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -75,15 +76,27 @@ def build_status(settings: Settings) -> dict[str, Any]:
     db = settings.db
     status: dict[str, Any] = {
         "config": {
-            "neo4j": {"uri": neo.uri, "user": neo.user, "database": neo.database,
-                      "password": _mask(neo.password)},
-            "database": {"engine": db.engine, "host": db.host, "port": db.port,
-                         "user": db.user, "password": _mask(db.password),
-                         "databases": db.names or "(auto-discover)"},
+            "neo4j": {
+                "uri": neo.uri,
+                "user": neo.user,
+                "database": neo.database,
+                "password": _mask(neo.password),
+            },
+            "database": {
+                "engine": db.engine,
+                "host": db.host,
+                "port": db.port,
+                "user": db.user,
+                "password": _mask(db.password),
+                "databases": db.names or "(auto-discover)",
+            },
             "options": {"batchSize": neo.batch_size, "includeLines": neo.include_lines},
         },
         "neo4j": {"connected": False},
-        "labels": {}, "relationshipTypes": [], "repositories": [], "databases": [],
+        "labels": {},
+        "relationshipTypes": [],
+        "repositories": [],
+        "databases": [],
     }
     try:
         gq = GraphQuery.connect(neo)
@@ -97,15 +110,18 @@ def build_status(settings: Settings) -> dict[str, Any]:
                 "labels": len(schema.get("labels", [])),
                 "relationshipTypes": len(schema.get("relationshipTypes", [])),
                 "relationships": sum(
-                    _as_int(v) for v in (schema.get("relationshipCountsByType") or {}).values()),
+                    _as_int(v) for v in (schema.get("relationshipCountsByType") or {}).values()
+                ),
             }
             status["repositories"] = gq._read(
                 "MATCH (r:Repository) RETURN r.name AS name, r.status AS status, "
                 "r.files AS files, r.commits AS commits, r.lastIngestedAt AS lastIngestedAt "
-                "ORDER BY r.name")
+                "ORDER BY r.name"
+            )
             status["databases"] = gq._read(
                 "MATCH (d:Database) OPTIONAL MATCH (d)-[:HAS_SCHEMA]->(:Schema)-[:HAS_TABLE]->(t:Table) "
-                "RETURN d.name AS name, d.engine AS engine, count(t) AS tables ORDER BY d.name")
+                "RETURN d.name AS name, d.engine AS engine, count(t) AS tables ORDER BY d.name"
+            )
         finally:
             gq.close()
     except Exception as exc:  # noqa: BLE001  # dashboard must render config even if the graph is unreachable
@@ -180,16 +196,23 @@ def schema_payload(schema: dict[str, Any]) -> dict[str, Any]:
     pairs.sort(key=lambda p: (-p[1], p[0]))
     labels = [{"name": n, "count": c} for n, c in pairs]
     rel_counts = schema.get("relationshipCountsByType") or {}
-    rel_pairs = [(str(r), _as_int(rel_counts.get(r)))
-                 for r in (schema.get("relationshipTypes") or [])]
+    rel_pairs = [
+        (str(r), _as_int(rel_counts.get(r))) for r in (schema.get("relationshipTypes") or [])
+    ]
     # Busiest first, like the labels: 25 alphabetical chips with no numbers say
     # nothing about the graph, and the useful ones end up buried mid-list.
     rel_pairs.sort(key=lambda p: (-p[1], p[0]))
     rels = [{"name": n, "count": c} for n, c in rel_pairs]
-    return {"labels": labels, "relationshipTypes": rels,
-            "totals": {"labels": len(labels), "relationshipTypes": len(rels),
-                       "nodes": sum(item["count"] for item in labels),
-                       "relationships": sum(item["count"] for item in rels)}}
+    return {
+        "labels": labels,
+        "relationshipTypes": rels,
+        "totals": {
+            "labels": len(labels),
+            "relationshipTypes": len(rels),
+            "nodes": sum(item["count"] for item in labels),
+            "relationships": sum(item["count"] for item in rels),
+        },
+    }
 
 
 #: Separators inside a deterministic node id, most specific last.
@@ -210,7 +233,7 @@ def caption_for(node_id: str, name: Any = None) -> str:
         return text
     tail = str(node_id)
     cut = max(tail.rfind(sep) for sep in _ID_SEPARATORS)
-    return tail[cut + 1:] or tail
+    return tail[cut + 1 :] or tail
 
 
 def graph_sample_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
@@ -219,8 +242,12 @@ def graph_sample_payload(rows: list[dict[str, Any]]) -> dict[str, Any]:
     links: list[dict[str, Any]] = []
 
     def _node(node_id: str, label: Any, name: Any) -> dict[str, Any]:
-        return {"id": node_id, "label": str(label or "Node"),
-                "caption": caption_for(node_id, name), "degree": 0}
+        return {
+            "id": node_id,
+            "label": str(label or "Node"),
+            "caption": caption_for(node_id, name),
+            "degree": 0,
+        }
 
     for row in rows or []:
         if not isinstance(row, dict):
@@ -255,8 +282,14 @@ def search_payload(rows: Any) -> list[dict[str, Any]]:
     for row in rows or []:
         node = row.get("n") if isinstance(row, dict) else None
         if isinstance(node, dict):
-            out.append({"id": node.get("id"), "name": node.get("name"),
-                        "ref": node.get("path") or node.get("fqn"), "properties": node})
+            out.append(
+                {
+                    "id": node.get("id"),
+                    "name": node.get("name"),
+                    "ref": node.get("path") or node.get("fqn"),
+                    "properties": node,
+                }
+            )
         elif isinstance(row, dict):
             out.append(row)
     return out
@@ -293,8 +326,9 @@ def _connect(settings: Settings) -> GraphQuery:
     return GraphQuery.connect(settings.neo4j)
 
 
-def _with_graph(settings: Settings, connect: Callable[[Settings], Any] | None,
-                work: Callable[[Any], Any]) -> tuple[int, Any]:
+def _with_graph(
+    settings: Settings, connect: Callable[[Settings], Any] | None, work: Callable[[Any], Any]
+) -> tuple[int, Any]:
     """Open a graph connection, run `work`, and turn every failure into JSON.
 
     Nothing here ever escapes as an unhandled exception: an unreachable graph
@@ -318,10 +352,16 @@ def _with_graph(settings: Settings, connect: Callable[[Settings], Any] | None,
                 closer()
 
 
-def route(path: str, query: str = "", body: Any = None, settings: Settings | None = None,
-          *, method: str = "GET",
-          connect: Callable[[Settings], Any] | None = None,
-          ingest: Any = None) -> tuple[int, Any]:
+def route(
+    path: str,
+    query: str = "",
+    body: Any = None,
+    settings: Settings | None = None,
+    *,
+    method: str = "GET",
+    connect: Callable[[Settings], Any] | None = None,
+    ingest: Any = None,
+) -> tuple[int, Any]:
     """Resolve an ``/api/...`` request to ``(http_status, json_payload)``.
 
     Pure with respect to the network: pass `connect` to inject a fake graph.
@@ -359,8 +399,9 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
         if denial:
             return 400, {"error": denial}
         limit = clamp_limit(payload.get("limit", limit_param), 200)
-        return _with_graph(settings, connect,
-                           lambda g: rows_payload(g.read_cypher(cypher, limit=limit)))
+        return _with_graph(
+            settings, connect, lambda g: rows_payload(g.read_cypher(cypher, limit=limit))
+        )
 
     if rest == ["ingest"] and method == "POST":
         # Absent when the dashboard is not bound to loopback: the endpoints do
@@ -373,9 +414,11 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
         except ValueError as exc:
             return 400, {"error": f"invalid JSON body: {exc}"}
         try:
-            job = ingest.start(str(payload.get("kind") or ""),
-                               str(payload.get("source") or ""),
-                               str(payload.get("name") or ""))
+            job = ingest.start(
+                str(payload.get("kind") or ""),
+                str(payload.get("source") or ""),
+                str(payload.get("name") or ""),
+            )
         except ValueError as exc:
             return 400, {"error": str(exc)}
         return 202, job.payload()
@@ -386,8 +429,10 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
     # -- GET --------------------------------------------------------------
     if rest == ["status"]:
         payload = build_status(settings)
-        payload["ingest"] = {"enabled": ingest is not None,
-                             "running": bool(ingest and ingest.running())}
+        payload["ingest"] = {
+            "enabled": ingest is not None,
+            "running": bool(ingest and ingest.running()),
+        }
         return 200, payload
 
     if rest == ["ingest"]:
@@ -408,8 +453,11 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
 
     if rest == ["graph", "sample"]:
         limit = clamp_limit(limit_param, 50)
-        return _with_graph(settings, connect, lambda g: graph_sample_payload(
-            g._read(_GRAPH_SAMPLE_CYPHER, {"limit": limit})))
+        return _with_graph(
+            settings,
+            connect,
+            lambda g: graph_sample_payload(g._read(_GRAPH_SAMPLE_CYPHER, {"limit": limit})),
+        )
 
     if rest == ["search"]:
         text = _first(params, "q").strip()
@@ -425,22 +473,42 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
                 return 400, {"error": f"invalid label {label!r}: expected a simple identifier"}
             if not is_identifier(prop):
                 return 400, {"error": f"invalid property {prop!r}: expected a simple identifier"}
-            return _with_graph(settings, connect, lambda g: {
-                "query": text, "label": label, "prop": prop, "limit": limit,
-                "results": search_payload(g.search_nodes(label, prop, text, limit))})
-        return _with_graph(settings, connect, lambda g: {
-            "query": text, "label": None, "limit": limit,
-            "results": g._read(_GENERIC_SEARCH_CYPHER, {"q": text, "limit": limit})})
+            return _with_graph(
+                settings,
+                connect,
+                lambda g: {
+                    "query": text,
+                    "label": label,
+                    "prop": prop,
+                    "limit": limit,
+                    "results": search_payload(g.search_nodes(label, prop, text, limit)),
+                },
+            )
+        return _with_graph(
+            settings,
+            connect,
+            lambda g: {
+                "query": text,
+                "label": None,
+                "limit": limit,
+                "results": g._read(_GENERIC_SEARCH_CYPHER, {"q": text, "limit": limit}),
+            },
+        )
 
     if len(rest) == 3 and rest[0] == "labels" and rest[2] == "sample":
         label = unquote(rest[1])
         if not is_identifier(label):
             return 400, {"error": f"invalid label {label!r}: expected a simple identifier"}
         limit = clamp_limit(limit_param, 20)
-        cypher = (f"MATCH (n:`{label}`) RETURN coalesce(n.id, toString(id(n))) AS id, "
-                  "labels(n) AS labels, properties(n) AS properties LIMIT $limit")
-        return _with_graph(settings, connect, lambda g: {
-            "label": label, "limit": limit, "nodes": g._read(cypher, {"limit": limit})})
+        cypher = (
+            f"MATCH (n:`{label}`) RETURN coalesce(n.id, toString(id(n))) AS id, "
+            "labels(n) AS labels, properties(n) AS properties LIMIT $limit"
+        )
+        return _with_graph(
+            settings,
+            connect,
+            lambda g: {"label": label, "limit": limit, "nodes": g._read(cypher, {"limit": limit})},
+        )
 
     if len(rest) == 3 and rest[0] == "node" and rest[2] == "neighbors":
         node_id = unquote(rest[1])
@@ -449,8 +517,15 @@ def route(path: str, query: str = "", body: Any = None, settings: Settings | Non
         if len(node_id) > 512:
             return 400, {"error": "node id too long (max 512 characters)"}
         limit = clamp_limit(limit_param, 50)
-        return _with_graph(settings, connect, lambda g: {
-            "id": node_id, "limit": limit, "neighbors": g.node_neighbors(node_id, limit)})
+        return _with_graph(
+            settings,
+            connect,
+            lambda g: {
+                "id": node_id,
+                "limit": limit,
+                "neighbors": g.node_neighbors(node_id, limit),
+            },
+        )
 
     return 404, {"error": f"unknown endpoint: {clean}"}
 
@@ -472,8 +547,7 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
 
         jobs = IngestJobs(settings)
         token = secrets.token_urlsafe(24)
-        html = html.replace("<!--gf-token-->",
-                            f'<meta name="gf-token" content="{token}" />')
+        html = html.replace("<!--gf-token-->", f'<meta name="gf-token" content="{token}" />')
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "graphforge-ui"
@@ -499,8 +573,10 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
                 return None
             if origin.lower() == "null":
                 return "cross-origin request rejected"
-            if _host_only(urlsplit(origin).netloc).lower() != _host_only(
-                    self.headers.get("Host", "")).lower():
+            if (
+                _host_only(urlsplit(origin).netloc).lower()
+                != _host_only(self.headers.get("Host", "")).lower()
+            ):
                 return "cross-origin request rejected"
             return None
 
@@ -523,13 +599,17 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
             parsed = urlsplit(self.path)
             if parsed.path == "/api" or parsed.path.startswith("/api/"):
                 # Anything that can change the graph needs the per-run token.
-                if (parsed.path.startswith("/api/ingest") and method != "GET"
-                        and (not token or self.headers.get("X-GF-Token") != token)):
+                if (
+                    parsed.path.startswith("/api/ingest")
+                    and method != "GET"
+                    and (not token or self.headers.get("X-GF-Token") != token)
+                ):
                     self._json(403, {"error": "missing or invalid X-GF-Token"})
                     return
                 try:
-                    code, payload = route(parsed.path, parsed.query, body, settings,
-                                          method=method, ingest=jobs)
+                    code, payload = route(
+                        parsed.path, parsed.query, body, settings, method=method, ingest=jobs
+                    )
                 except Exception as exc:  # noqa: BLE001 — last-ditch: still answer with JSON
                     log.exception("dashboard route failed for %s", self.path)
                     code, payload = 500, {"error": str(exc)}
@@ -563,8 +643,10 @@ def serve(settings: Settings, host: str = "127.0.0.1", port: int = 8000) -> None
     if not is_loopback_host(host):
         # /api/status reports the resolved Neo4j URI, database names, repository
         # names and hostnames. Passwords are masked; none of the rest is.
-        print(f"[graphforge] WARNING: bound to {host}, not loopback - the dashboard "
-              "has no authentication and /api/status exposes your configuration")
+        print(
+            f"[graphforge] WARNING: bound to {host}, not loopback - the dashboard "
+            "has no authentication and /api/status exposes your configuration"
+        )
     try:
         server.serve_forever()
     except KeyboardInterrupt:

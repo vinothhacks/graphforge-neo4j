@@ -1,4 +1,5 @@
 """Optional: discover repositories from a GitLab group via the REST API."""
+
 from __future__ import annotations
 
 import logging
@@ -10,8 +11,9 @@ log = logging.getLogger("graphforge.git.discover")
 MAX_PAGES = 500
 
 
-def gitlab_group_repos(server: str, group_id: str, token: str = "",
-                       default_branch: str = "main", since_days: int = 0) -> list[dict]:
+def gitlab_group_repos(
+    server: str, group_id: str, token: str = "", default_branch: str = "main", since_days: int = 0
+) -> list[dict]:
     """Return repo specs for every project in a GitLab group (incl. subgroups).
 
     If ``since_days`` > 0, only projects with activity in that window are
@@ -23,15 +25,19 @@ def gitlab_group_repos(server: str, group_id: str, token: str = "",
         import requests  # lazy: GitLab discovery is the only thing that needs it
     except ImportError as exc:  # pragma: no cover
         raise RuntimeError(
-            "GitLab discovery is not installed. Run: "
-            "pip install 'graphforge-neo4j[gitlab]'"
+            "GitLab discovery is not installed. Run: pip install 'graphforge-neo4j[gitlab]'"
         ) from exc
 
     server = server.rstrip("/")
     headers = {"PRIVATE-TOKEN": token} if token else {}
-    params_base = {"include_subgroups": "true", "per_page": 100,
-                   "archived": "false", "simple": "true",
-                   "order_by": "last_activity_at", "sort": "desc"}
+    params_base = {
+        "include_subgroups": "true",
+        "per_page": 100,
+        "archived": "false",
+        "simple": "true",
+        "order_by": "last_activity_at",
+        "sort": "desc",
+    }
     if since_days and since_days > 0:
         cutoff = datetime.now(timezone.utc) - timedelta(days=since_days)
         params_base["last_activity_after"] = cutoff.isoformat()
@@ -41,7 +47,8 @@ def gitlab_group_repos(server: str, group_id: str, token: str = "",
         resp = requests.get(
             f"{server}/api/v4/groups/{group_id}/projects",
             params={**params_base, "page": page},
-            headers=headers, timeout=60,
+            headers=headers,
+            timeout=60,
         )
         resp.raise_for_status()
         batch = resp.json()
@@ -57,11 +64,13 @@ def gitlab_group_repos(server: str, group_id: str, token: str = "",
                 continue
             seen.add(url)
             fresh += 1
-            specs.append({
-                "name": proj["path"],
-                "url": url,
-                "branch": proj.get("default_branch") or default_branch,
-            })
+            specs.append(
+                {
+                    "name": proj["path"],
+                    "url": url,
+                    "branch": proj.get("default_branch") or default_branch,
+                }
+            )
         if not fresh:
             log.warning("GitLab returned no new projects on page %d; stopping", page)
             break

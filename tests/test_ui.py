@@ -1,4 +1,5 @@
 """Dashboard status payload: password masking + graceful degradation."""
+
 import re
 import shutil
 import subprocess
@@ -41,13 +42,16 @@ def test_degrades_gracefully_without_neo4j():
 
 def _dashboard_html():
     import graphforge.ui.server as srv
+
     return (Path(srv.__file__).parent / "dashboard.html").read_text(encoding="utf-8")
 
 
 def _inline_scripts(html: str) -> list[str]:
     """Every inline <script> body in the dashboard, in document order."""
-    return [m.group(1) for m in
-            re.finditer(r"<script\b[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE)]
+    return [
+        m.group(1)
+        for m in re.finditer(r"<script\b[^>]*>(.*?)</script>", html, re.DOTALL | re.IGNORECASE)
+    ]
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
@@ -65,8 +69,9 @@ def test_the_dashboard_javascript_parses():
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / f"script{index}.js"
             path.write_text(body, encoding="utf-8")
-            done = subprocess.run(["node", "--check", str(path)],
-                                  capture_output=True, text=True, check=False)
+            done = subprocess.run(
+                ["node", "--check", str(path)], capture_output=True, text=True, check=False
+            )
         assert done.returncode == 0, f"inline script {index} does not parse:\n{done.stderr}"
 
 
@@ -81,8 +86,18 @@ def test_dashboard_html_has_no_external_references_at_all():
     """No CDN, no absolute URL, no external stylesheet/script/font — one file, zero network."""
     html = _dashboard_html()
     low = html.lower()
-    for needle in ("cdn", "http", "://", "@import", "integrity=", "crossorigin",
-                   "unpkg", "jsdelivr", "googleapis", "//fonts"):
+    for needle in (
+        "cdn",
+        "http",
+        "://",
+        "@import",
+        "integrity=",
+        "crossorigin",
+        "unpkg",
+        "jsdelivr",
+        "googleapis",
+        "//fonts",
+    ):
         assert needle not in low, f"dashboard.html references {needle!r}"
     assert "<script src" not in low.replace("\n", " ")
     assert "<link" not in low  # no external stylesheet or preconnect
@@ -91,13 +106,20 @@ def test_dashboard_html_has_no_external_references_at_all():
 def test_dashboard_html_ships_the_vanilla_enhancements():
     html = _dashboard_html()
     # every endpoint the dashboard talks to is same-origin and relative
-    for endpoint in ("/api/status", "/api/schema", "/api/query",
-                     "/api/graph/sample", "/api/search?q=", "/api/labels/", "/api/node/"):
+    for endpoint in (
+        "/api/status",
+        "/api/schema",
+        "/api/query",
+        "/api/graph/sample",
+        "/api/search?q=",
+        "/api/labels/",
+        "/api/node/",
+    ):
         assert endpoint in html, endpoint
-    assert "<canvas" in html and "requestAnimationFrame" in html   # force-directed viz
-    assert "localStorage" in html                                   # theme + query history
-    assert ":root.light" in html                                    # readable light theme
-    assert "<noscript>" in html                                     # degrades without JS
-    assert 'class="skel"' in html or "skel" in html                 # shimmer loading states
-    assert "<textarea" in html                                      # cypher console
-    assert "modal" in html                                          # label explorer
+    assert "<canvas" in html and "requestAnimationFrame" in html  # force-directed viz
+    assert "localStorage" in html  # theme + query history
+    assert ":root.light" in html  # readable light theme
+    assert "<noscript>" in html  # degrades without JS
+    assert 'class="skel"' in html or "skel" in html  # shimmer loading states
+    assert "<textarea" in html  # cypher console
+    assert "modal" in html  # label explorer

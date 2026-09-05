@@ -8,6 +8,7 @@ plaintext. Two rules make that unnecessary:
   up pointing at some other project's virtualenv, and
 * the password is never written — the entry points at a ``.env`` instead.
 """
+
 from __future__ import annotations
 
 import json
@@ -33,9 +34,14 @@ def plan(client: McpClient, entry: dict) -> tuple[dict, str]:
     return merged, action
 
 
-def install(clients: list[str] | None = None, env_file: Path | None = None, *,
-            project_dir: Path | None = None, dry_run: bool = False,
-            command: str | None = None) -> list[str]:
+def install(
+    clients: list[str] | None = None,
+    env_file: Path | None = None,
+    *,
+    project_dir: Path | None = None,
+    dry_run: bool = False,
+    command: str | None = None,
+) -> list[str]:
     """Register graphforge with each requested client. Returns report lines."""
     entry = server_entry(env_file, command)
     lines: list[str] = []
@@ -43,8 +49,10 @@ def install(clients: list[str] | None = None, env_file: Path | None = None, *,
         merged, action = plan(client, entry)
         if dry_run:
             lines.append(f"{client.label}: would be {action} at {client.path}")
-            lines.extend("    " + ln for ln in json.dumps(
-                {SERVERS_KEY: {SERVER_NAME: entry}}, indent=2).splitlines())
+            lines.extend(
+                "    " + ln
+                for ln in json.dumps({SERVERS_KEY: {SERVER_NAME: entry}}, indent=2).splitlines()
+            )
             continue
         if action == "unchanged":
             lines.append(f"{client.label}: already registered ({client.path})")
@@ -60,8 +68,7 @@ def install(clients: list[str] | None = None, env_file: Path | None = None, *,
     return lines
 
 
-def uninstall(clients: list[str] | None = None, *,
-              project_dir: Path | None = None) -> list[str]:
+def uninstall(clients: list[str] | None = None, *, project_dir: Path | None = None) -> list[str]:
     """Remove graphforge from each requested client, leaving other servers alone."""
     lines: list[str] = []
     for client in _targets(clients, project_dir):
@@ -73,8 +80,8 @@ def uninstall(clients: list[str] | None = None, *,
         servers.pop(SERVER_NAME)
         try:
             client.path.write_text(
-                json.dumps({**config, SERVERS_KEY: servers}, indent=2) + "\n",
-                encoding="utf-8")
+                json.dumps({**config, SERVERS_KEY: servers}, indent=2) + "\n", encoding="utf-8"
+            )
         except OSError as exc:
             lines.append(f"{client.label}: could not write {client.path} - {exc}")
             continue

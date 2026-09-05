@@ -8,6 +8,7 @@ Every language parser returns the same dict shape (see ``parsers.java``), so the
 scanner stores it in one language-agnostic field — ``ScannedFile.structure`` —
 and ``git.ingest`` maps Class/Method nodes through a single code path.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -29,8 +30,8 @@ PARSERS = {
 
 @dataclass
 class Module:
-    key: str          # repo-relative dir ("" == repo root); unique within repo
-    name: str         # display name (artifactId or dir name)
+    key: str  # repo-relative dir ("" == repo root); unique within repo
+    name: str  # display name (artifactId or dir name)
     root_abs: str
     pom: dict | None = None
 
@@ -45,7 +46,7 @@ class ScannedFile:
     hash: str
     module_key: str
     package: str = ""
-    namespace: str = ""        # qualifier for class FQNs (Java package, Python module, …)
+    namespace: str = ""  # qualifier for class FQNs (Java package, Python module, …)
     structure: dict | None = None
     lines: list[dict] = field(default_factory=list)
 
@@ -119,7 +120,7 @@ def namespace_for(rel: str, ftype: str, info: dict[str, Any]) -> str:
     if ftype == "go":
         return directory or info.get("package", "")
     stem = os.path.splitext(rel)[0]
-    if stem.endswith(".d"):        # foo.d.ts -> foo
+    if stem.endswith(".d"):  # foo.d.ts -> foo
         stem = stem[:-2]
     return stem.replace("/", ".")
 
@@ -132,8 +133,13 @@ def scan_file(file_abs: str, repo_root: str, module_key: str, include_lines: boo
     raw = _read_lines(file_abs)
 
     sf = ScannedFile(
-        relpath=rel, name=name, type=ftype, extension=ext,
-        total_lines=len(raw), hash=_hash(file_abs), module_key=module_key,
+        relpath=rel,
+        name=name,
+        type=ftype,
+        extension=ext,
+        total_lines=len(raw),
+        hash=_hash(file_abs),
+        module_key=module_key,
     )
     parser = PARSERS.get(ftype)
     if parser is not None:
@@ -150,8 +156,9 @@ def scan_file(file_abs: str, repo_root: str, module_key: str, include_lines: boo
     return sf
 
 
-def scan_repo(repo_root: str, repo_name: str, include_lines: bool = False,
-              only_paths: set[str] | None = None) -> dict[str, Any]:
+def scan_repo(
+    repo_root: str, repo_name: str, include_lines: bool = False, only_paths: set[str] | None = None
+) -> dict[str, Any]:
     """Scan a repository tree.
 
     ``only_paths`` (repo-relative, POSIX separators) restricts the scan to a set

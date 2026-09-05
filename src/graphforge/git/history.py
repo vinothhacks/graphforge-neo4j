@@ -5,6 +5,7 @@ Two `git log` passes are merged per commit: `--numstat` gives per-file
 insertions/deletions, `--name-status` gives the change type (A/M/D/R). Renames
 are normalised to the new path so :File identity stays stable.
 """
+
 from __future__ import annotations
 
 import logging
@@ -15,9 +16,7 @@ log = logging.getLogger("graphforge.git.history")
 
 _MARK = "@@C@@"
 _US = "\x1f"  # unit separator, unlikely to appear in commit metadata
-_FMT = _MARK + _US + _US.join(
-    ["%H", "%h", "%an", "%ae", "%aI", "%cn", "%ce", "%cI", "%P", "%s"]
-)
+_FMT = _MARK + _US + _US.join(["%H", "%h", "%an", "%ae", "%aI", "%cn", "%ce", "%cI", "%P", "%s"])
 
 
 @dataclass
@@ -27,7 +26,7 @@ class HistoryData:
     branches: list[dict] = field(default_factory=list)
     tags: list[dict] = field(default_factory=list)
     head: str = ""
-    since: str = ""          # sha the incremental walk started after ('' == full)
+    since: str = ""  # sha the incremental walk started after ('' == full)
 
     @property
     def changed_paths(self) -> set[str]:
@@ -37,8 +36,14 @@ class HistoryData:
 
 def _run(repo_path: str, args: list[str]) -> str:
     proc = subprocess.run(
-        ["git", *args], cwd=repo_path, capture_output=True, text=True,
-        encoding="utf-8", errors="replace", timeout=900, check=False,
+        ["git", *args],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        timeout=900,
+        check=False,
     )
     if proc.returncode != 0:
         log.debug("git %s -> %s", " ".join(args), proc.stderr.strip())
@@ -51,7 +56,11 @@ def _normalise_path(path: str) -> str:
         # forms: "old => new"  or  "dir/{old => new}/file"
         path = path.replace("{", "").replace("}", "")
         left, _, right = path.partition("=>")
-        merged = (left.strip() + right.strip()) if "/" in right and right.strip().startswith("/") else right.strip()
+        merged = (
+            (left.strip() + right.strip())
+            if "/" in right and right.strip().startswith("/")
+            else right.strip()
+        )
         path = merged or right.strip()
     return path.strip()
 
@@ -79,9 +88,14 @@ def _parse_log(repo_path: str, mode: str, limit: int, since: str = ""):
             # parts[0] == _MARK
             current = parts[1]
             header_fields[current] = {
-                "hash": parts[1], "short": parts[2],
-                "authorName": parts[3], "authorEmail": parts[4], "authoredAt": parts[5],
-                "committerName": parts[6], "committerEmail": parts[7], "committedAt": parts[8],
+                "hash": parts[1],
+                "short": parts[2],
+                "authorName": parts[3],
+                "authorEmail": parts[4],
+                "authoredAt": parts[5],
+                "committerName": parts[6],
+                "committerEmail": parts[7],
+                "committedAt": parts[8],
                 "parents": parts[9].split() if parts[9] else [],
                 "message": parts[10] if len(parts) > 10 else "",
             }
@@ -121,8 +135,12 @@ def commit_exists(repo_path: str, sha: str) -> bool:
     if not sha:
         return False
     proc = subprocess.run(
-        ["git", "cat-file", "-e", f"{sha}^{{commit}}"], cwd=repo_path,
-        capture_output=True, text=True, timeout=60, check=False,
+        ["git", "cat-file", "-e", f"{sha}^{{commit}}"],
+        cwd=repo_path,
+        capture_output=True,
+        text=True,
+        timeout=60,
+        check=False,
     )
     return proc.returncode == 0
 
@@ -133,8 +151,11 @@ def extract_history(repo_path: str, limit: int = 0, since_commit: str = "") -> H
 
     since = since_commit if since_commit and commit_exists(repo_path, since_commit) else ""
     if since_commit and not since:
-        log.warning("--since-commit %s not found in %s; falling back to full history",
-                    since_commit, repo_path)
+        log.warning(
+            "--since-commit %s not found in %s; falling back to full history",
+            since_commit,
+            repo_path,
+        )
     data.since = since
 
     numstat, headers = _parse_log(repo_path, "numstat", limit, since)
@@ -146,12 +167,14 @@ def extract_history(repo_path: str, limit: int = 0, since_commit: str = "") -> H
         files: list[dict] = []
         total_ins = total_del = 0
         for row in numstat.get(h, []):
-            files.append({
-                "path": row["path"],
-                "insertions": row["insertions"],
-                "deletions": row["deletions"],
-                "changeType": type_by_path.get(row["path"], "M"),
-            })
+            files.append(
+                {
+                    "path": row["path"],
+                    "insertions": row["insertions"],
+                    "deletions": row["deletions"],
+                    "changeType": type_by_path.get(row["path"], "M"),
+                }
+            )
             total_ins += row["insertions"]
             total_del += row["deletions"]
         # files that appear only in name-status (e.g. pure renames, binary)
@@ -170,7 +193,9 @@ def extract_history(repo_path: str, limit: int = 0, since_commit: str = "") -> H
         aid = (meta["authorEmail"] or meta["authorName"]).lower()
         data.authors[aid] = {"name": meta["authorName"], "email": meta["authorEmail"]}
         cid = (meta["committerEmail"] or meta["committerName"]).lower()
-        data.authors.setdefault(cid, {"name": meta["committerName"], "email": meta["committerEmail"]})
+        data.authors.setdefault(
+            cid, {"name": meta["committerName"], "email": meta["committerEmail"]}
+        )
 
     data.commits.sort(key=lambda c: c.get("authoredAt", ""))
     data.branches = _branches(repo_path)

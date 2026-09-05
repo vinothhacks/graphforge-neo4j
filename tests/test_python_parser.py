@@ -1,4 +1,5 @@
 """Structural parsing of Python source (graphforge.git.parsers.python)."""
+
 from graphforge.git.parsers.python import extract
 
 SRC = '''"""Order domain model."""
@@ -68,8 +69,17 @@ def test_module_docstring():
 
 def test_imports():
     fqns = {i["fqn"] for i in extract(SRC)["imports"]}
-    assert {"os", "sys", "collections.abc", "typing.Any", "typing.Optional",
-            ".base.Base", ".base.Mixin", ".util", "__future__.annotations"} <= fqns
+    assert {
+        "os",
+        "sys",
+        "collections.abc",
+        "typing.Any",
+        "typing.Optional",
+        ".base.Base",
+        ".base.Mixin",
+        ".util",
+        "__future__.annotations",
+    } <= fqns
     aliases = {i["fqn"]: i["alias"] for i in extract(SRC)["imports"]}
     assert aliases["sys"] == "system"
     assert aliases["typing.Optional"] == "Opt"
@@ -98,13 +108,13 @@ def test_functions_and_methods():
     info = extract(SRC)
     by_name = {m["name"]: m for m in info["methods"]}
     assert {"__init__", "total", "refresh", "__secret", "get", "module_level"} <= set(by_name)
-    assert by_name["refresh"]["isAsync"] is True          # multi-line `async def`
+    assert by_name["refresh"]["isAsync"] is True  # multi-line `async def`
     assert by_name["total"]["isAsync"] is False
     assert by_name["total"]["returnType"] == "float"
     assert by_name["module_level"]["returnType"] == "int"
     assert by_name["total"]["owner"] == "Order"
     assert by_name["get"]["owner"] == "Repo"
-    assert by_name["module_level"]["owner"] == ""         # module-level function
+    assert by_name["module_level"]["owner"] == ""  # module-level function
     assert by_name["__secret"]["visibility"] == "private"
     assert by_name["__init__"]["visibility"] == "public"  # dunder is API surface
 
@@ -122,10 +132,10 @@ def test_decorators_land_in_annotations():
 def test_orm_table_mapping():
     info = extract(SRC)
     order = next(c for c in info["classes"] if c["name"] == "Order")
-    assert order["mappedTable"] == "orders"       # SQLAlchemy __tablename__
+    assert order["mappedTable"] == "orders"  # SQLAlchemy __tablename__
     assert order["stereotype"] == "Entity"
     legacy = next(c for c in info["classes"] if c["name"] == "Legacy")
-    assert legacy["mappedTable"] == "legacy_orders"   # Django class Meta.db_table
+    assert legacy["mappedTable"] == "legacy_orders"  # Django class Meta.db_table
     assert "Meta" not in {c["name"] for c in info["classes"]}
 
 
@@ -133,15 +143,35 @@ def test_dotted_decorator_and_async_def_alone():
     info = extract(["@app.route('/x')", "async def handler():", "    pass"])
     assert info["annotations"][0]["name"] == "app.route"
     assert info["methods"][0] == {
-        "name": "handler", "line": 2, "returnType": "", "visibility": "public",
-        "isAsync": True, "owner": "", "annotations": ["app.route"],
+        "name": "handler",
+        "line": 2,
+        "returnType": "",
+        "visibility": "public",
+        "isAsync": True,
+        "owner": "",
+        "annotations": ["app.route"],
     }
 
 
 def test_malformed_input_never_raises():
-    for bad in ([], ["class ((((("], ["def )(:"], ["@@@@"], ["from import"],
-                ["'''never closed"], ["\x00\xff binary"], ["import"]):
+    for bad in (
+        [],
+        ["class ((((("],
+        ["def )(:"],
+        ["@@@@"],
+        ["from import"],
+        ["'''never closed"],
+        ["\x00\xff binary"],
+        ["import"],
+    ):
         info = extract(bad)
         assert info["classes"] == [] or isinstance(info["classes"], list)
-        assert set(info) >= {"package", "imports", "classes", "interfaces",
-                             "enums", "methods", "annotations"}
+        assert set(info) >= {
+            "package",
+            "imports",
+            "classes",
+            "interfaces",
+            "enums",
+            "methods",
+            "annotations",
+        }

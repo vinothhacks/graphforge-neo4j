@@ -1,4 +1,5 @@
 """Offline --emit / --dry-run: Neo4j driver is never opened."""
+
 from __future__ import annotations
 
 import logging
@@ -43,6 +44,7 @@ def _patch_driver(monkeypatch):
         raise AssertionError("Neo4j driver was opened")
 
     import neo4j
+
     monkeypatch.setattr(neo4j.GraphDatabase, "driver", boom)
     return hits
 
@@ -51,10 +53,25 @@ def _patch_driver(monkeypatch):
 def test_git_init_link_emit_and_dry_run_never_open_neo4j(monkeypatch, repo, tmp_path):
     hits = _patch_driver(monkeypatch)
     assert main(["init", "--emit", str(tmp_path / "init.cypher")]) == 0
-    assert "CONSTRAINT" in (tmp_path / "init.cypher").read_text() or "INDEX" in (tmp_path / "init.cypher").read_text()
+    assert (
+        "CONSTRAINT" in (tmp_path / "init.cypher").read_text()
+        or "INDEX" in (tmp_path / "init.cypher").read_text()
+    )
     assert main(["init", "--dry-run"]) == 0
-    assert main(["git", str(repo), "--name", "demo", "--emit", str(tmp_path / "git.cypher"),
-                 "--no-schema"]) == 0
+    assert (
+        main(
+            [
+                "git",
+                str(repo),
+                "--name",
+                "demo",
+                "--emit",
+                str(tmp_path / "git.cypher"),
+                "--no-schema",
+            ]
+        )
+        == 0
+    )
     text = (tmp_path / "git.cypher").read_text()
     assert "MERGE (n:Repository" in text or "MERGE (n:File" in text
     assert main(["git", str(repo), "--name", "demo", "--dry-run", "--no-schema"]) == 0
@@ -78,9 +95,19 @@ def test_db_and_vds_emit_dry_run_never_open_neo4j(monkeypatch, tmp_path):
     with Neo4jWriter(settings=None, dry_run=True) as w:
         DbIngestor(w).write_database(meta)
         assert w.ops_written > 0
-    rows = [{"sid": 1, "servicename": "s", "query": "select 1", "coretable": "orders",
-             "groupby": "", "orderby": "", "tablename": "orders",
-             "columnname": "id", "fieldname": "id"}]
+    rows = [
+        {
+            "sid": 1,
+            "servicename": "s",
+            "query": "select 1",
+            "coretable": "orders",
+            "groupby": "",
+            "orderby": "",
+            "tablename": "orders",
+            "columnname": "id",
+            "fieldname": "id",
+        }
+    ]
     vds_out = tmp_path / "vds.cypher"
     with Neo4jWriter(settings=None, emit_path=str(vds_out)) as w:
         VdsIngestor(w).write_rows(rows, "mysql", "h", "shop")
@@ -97,7 +124,8 @@ def test_since_commit_auto_emit_logs_why(repo, tmp_path, caplog):
     out = tmp_path / "inc.cypher"
     with Neo4jWriter(settings=None, emit_path=str(out)) as w:
         GitIngestor(w, GitSettings(repo_dir=str(tmp_path / "clone"))).ingest_repo(
-            {"path": str(repo), "name": "demo"}, since_commit="auto")
+            {"path": str(repo), "name": "demo"}, since_commit="auto"
+        )
     assert "cannot read :Repository.lastCommit" in caplog.text
     assert "emit" in caplog.text
     assert Path(out).read_text()  # full ingest still produced Cypher

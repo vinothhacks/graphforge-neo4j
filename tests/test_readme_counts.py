@@ -1,4 +1,5 @@
 """README numbers must match the code. If this fails, fix the README (code wins)."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,8 +19,18 @@ def test_readme_command_count():
     sub = parser._subparsers._group_actions[0]
     names = set(sub.choices)
     assert names == {
-        "init", "git", "db", "vds", "link", "status", "verify", "search", "ui", "mcp",
-        "doctor", "quickstart",
+        "init",
+        "git",
+        "db",
+        "vds",
+        "link",
+        "status",
+        "verify",
+        "search",
+        "ui",
+        "mcp",
+        "doctor",
+        "quickstart",
     }
     assert len(names) == 12
 

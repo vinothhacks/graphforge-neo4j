@@ -9,6 +9,7 @@ No ingest logic lives here. A job is a thread that calls the same
 :class:`~graphforge.git.ingest.GitIngestor` / :class:`~graphforge.db.ingest.DbIngestor`
 the CLI calls, with a log handler attached so the browser can watch it happen.
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -66,10 +67,10 @@ class Job:
 
     id: str
     kind: str
-    source: str                     # redacted — this is what the browser sees
+    source: str  # redacted — this is what the browser sees
     name: str = ""
-    raw: str = ""                   # the real source, never serialised
-    state: str = "running"          # running | done | failed
+    raw: str = ""  # the real source, never serialised
+    state: str = "running"  # running | done | failed
     started: str = field(default_factory=_now)
     finished: str = ""
     error: str = ""
@@ -92,10 +93,18 @@ class Job:
         return out
 
     def payload(self) -> dict[str, Any]:
-        return {"id": self.id, "kind": self.kind, "source": self.source, "name": self.name,
-                "state": self.state, "started": self.started, "finished": self.finished,
-                "error": self.scrub(self.error), "summary": self.scrub(self.summary),
-                "lines": [self.scrub(line) for line in self.lines]}
+        return {
+            "id": self.id,
+            "kind": self.kind,
+            "source": self.source,
+            "name": self.name,
+            "state": self.state,
+            "started": self.started,
+            "finished": self.finished,
+            "error": self.scrub(self.error),
+            "summary": self.scrub(self.summary),
+            "lines": [self.scrub(line) for line in self.lines],
+        }
 
 
 class _Capture(logging.Handler):
@@ -109,7 +118,8 @@ class _Capture(logging.Handler):
         # A malformed log record must not take the ingest down with it.
         with contextlib.suppress(Exception):
             self.job.lines.append(
-                f"{record.levelname.lower()}: {self.job.scrub(record.getMessage())}")
+                f"{record.levelname.lower()}: {self.job.scrub(record.getMessage())}"
+            )
 
 
 class IngestJobs:
@@ -132,15 +142,21 @@ class IngestJobs:
         if self.running():
             raise ValueError("an ingest is already running - wait for it to finish")
 
-        job = Job(id=uuid.uuid4().hex[:12], kind=kind, source=redact_url(source),
-                  raw=source, name=name.strip())
+        job = Job(
+            id=uuid.uuid4().hex[:12],
+            kind=kind,
+            source=redact_url(source),
+            raw=source,
+            name=name.strip(),
+        )
         with self._lock:
             if len(self._order) == self._order.maxlen and self._order:
                 self._jobs.pop(self._order[0], None)
             self._jobs[job.id] = job
             self._order.append(job.id)
-        threading.Thread(target=self._run, args=(job,), daemon=True,
-                         name=f"gf-ingest-{job.id}").start()
+        threading.Thread(
+            target=self._run, args=(job,), daemon=True, name=f"gf-ingest-{job.id}"
+        ).start()
         return job
 
     def get(self, job_id: str) -> Job | None:
@@ -174,9 +190,11 @@ class IngestJobs:
             # dashboard shows would not move for up to a minute after an ingest
             # the user just watched finish.
             from ..mcp.server import clear_schema_cache
+
             clear_schema_cache()
         except Exception as exc:  # noqa: BLE001 — a failed ingest is a result, not a crash
             from ..core.errors import neo4j_advice
+
             job.state = "failed"
             job.error = neo4j_advice(exc, self.settings) or str(exc)
             job.lines.append(f"failed: {job.error}")
@@ -195,17 +213,23 @@ class IngestJobs:
 
                 ingestor = GitIngestor(writer, self.settings.git)
                 ingestor.apply_schema()
-                spec = ({"url": job.raw, "name": job.name or None}
-                        if "://" in job.raw or job.raw.endswith(".git")
-                        else {"path": job.raw, "name": job.name or None})
+                spec = (
+                    {"url": job.raw, "name": job.name or None}
+                    if "://" in job.raw or job.raw.endswith(".git")
+                    else {"path": job.raw, "name": job.name or None}
+                )
                 stats = ingestor.ingest([spec])
-                return (f"{stats['repos']} repositories, {stats['files']} files, "
-                        f"{stats['commits']} commits")
+                return (
+                    f"{stats['repos']} repositories, {stats['files']} files, "
+                    f"{stats['commits']} commits"
+                )
 
             from ..db import DbIngestor, parse_db_url
 
             db_ingestor = DbIngestor(writer)
             db_ingestor.apply_schema()
             stats = db_ingestor.ingest_sources([parse_db_url(job.raw)])
-            return (f"{stats['databases']} databases, {stats['tables']} tables, "
-                    f"{stats['columns']} columns")
+            return (
+                f"{stats['databases']} databases, {stats['tables']} tables, "
+                f"{stats['columns']} columns"
+            )

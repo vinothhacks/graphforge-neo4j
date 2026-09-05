@@ -1,4 +1,5 @@
 """Pytest markers: e2e suites stay skipped unless explicitly enabled."""
+
 from __future__ import annotations
 
 import os
@@ -7,15 +8,19 @@ import pytest
 
 
 def pytest_addoption(parser):
-    parser.addoption("--e2e-critical", action="store_true", default=False,
-                     help="run live Neo4j CLI/HTTP tests")
-    parser.addoption("--e2e-full", action="store_true", default=False,
-                     help="run playground Neo4j+Postgres tests")
+    parser.addoption(
+        "--e2e-critical", action="store_true", default=False, help="run live Neo4j CLI/HTTP tests"
+    )
+    parser.addoption(
+        "--e2e-full", action="store_true", default=False, help="run playground Neo4j+Postgres tests"
+    )
 
 
 def pytest_configure(config):
     config.addinivalue_line("markers", "e2e_critical: live Neo4j, HTTP/CLI only (no browser)")
-    config.addinivalue_line("markers", "e2e_full: playground Neo4j + Postgres + graphforge MCP stdio")
+    config.addinivalue_line(
+        "markers", "e2e_full: playground Neo4j + Postgres + graphforge MCP stdio"
+    )
 
 
 def pytest_collection_modifyitems(config, items):

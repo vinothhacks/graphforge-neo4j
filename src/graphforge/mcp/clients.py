@@ -5,6 +5,7 @@ is wired up, and ``graphforge mcp install`` writes through it. Every client in
 use today reads the same ``mcpServers`` object, so the only thing that really
 differs is the path.
 """
+
 from __future__ import annotations
 
 import json

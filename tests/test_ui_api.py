@@ -3,6 +3,7 @@
 Everything here runs against the pure `route()` function with a fake graph, so no
 live Neo4j (and, apart from one deliberate loopback smoke test, no socket) is needed.
 """
+
 from __future__ import annotations
 
 import json
@@ -88,10 +89,12 @@ class _StubGraph:
     """Minimal duck-typed graph for endpoints whose Cypher we do not care about."""
 
     def __init__(self, schema=None, raises=None):
-        self.schema = schema or {"labels": ["Class", "Method"],
-                                 "relationshipTypes": ["CALLS", "DECLARES"],
-                                 "nodeCountsByLabel": {"Class": 3, "Method": 11},
-                                 "relationshipCountsByType": {"CALLS": 9, "DECLARES": 2}}
+        self.schema = schema or {
+            "labels": ["Class", "Method"],
+            "relationshipTypes": ["CALLS", "DECLARES"],
+            "nodeCountsByLabel": {"Class": 3, "Method": 11},
+            "relationshipCountsByType": {"CALLS": 9, "DECLARES": 2},
+        }
         self.raises = raises
         self.closed = False
 
@@ -128,8 +131,9 @@ WRITE_QUERIES = [
 def test_query_rejects_writes_without_ever_touching_the_graph():
     for cypher in WRITE_QUERIES:
         spy = _Spy()
-        code, payload = srv.route("/api/query", "", {"cypher": cypher}, _settings(),
-                                  method="POST", connect=spy)
+        code, payload = srv.route(
+            "/api/query", "", {"cypher": cypher}, _settings(), method="POST", connect=spy
+        )
         assert code == 400, f"{cypher!r} was not rejected (got {code})"
         assert payload.get("error")
         assert spy.connections == 0, f"{cypher!r} opened a connection"
@@ -138,6 +142,7 @@ def test_query_rejects_writes_without_ever_touching_the_graph():
 
 def test_write_guard_is_enforced_again_inside_graphquery():
     """Defence in depth: even if the router's pre-check were bypassed, nothing runs."""
+
     def _bypassed(_cypher):  # simulate a front-line check that has been defeated
         return False
 
@@ -145,8 +150,14 @@ def test_write_guard_is_enforced_again_inside_graphquery():
     original = srv.is_write_query
     srv.is_write_query = _bypassed
     try:
-        code, payload = srv.route("/api/query", "", {"cypher": "MATCH (n) DELETE n"},
-                                  _settings(), method="POST", connect=spy)
+        code, payload = srv.route(
+            "/api/query",
+            "",
+            {"cypher": "MATCH (n) DELETE n"},
+            _settings(),
+            method="POST",
+            connect=spy,
+        )
     finally:
         srv.is_write_query = original
     assert code == 400
@@ -164,9 +175,14 @@ def test_graphquery_read_cypher_still_raises_on_writes():
 
 def test_query_runs_read_only_cypher_and_shapes_rows():
     spy = _Spy(rows=[{"label": "Class", "total": 3}])
-    code, payload = srv.route("/api/query", "",
-                              {"cypher": "MATCH (n) RETURN labels(n) AS label, count(*) AS total"},
-                              _settings(), method="POST", connect=spy)
+    code, payload = srv.route(
+        "/api/query",
+        "",
+        {"cypher": "MATCH (n) RETURN labels(n) AS label, count(*) AS total"},
+        _settings(),
+        method="POST",
+        connect=spy,
+    )
     assert code == 200
     assert payload["columns"] == ["label", "total"]
     assert payload["count"] == 1
@@ -179,24 +195,45 @@ def test_query_rejects_bad_bodies_and_wrong_method():
     assert code == 405
 
     for body in (None, {}, {"cypher": "   "}, b'{"cypher": ""}'):
-        code, payload = srv.route("/api/query", "", body, _settings(), method="POST", connect=_Spy())
+        code, payload = srv.route(
+            "/api/query", "", body, _settings(), method="POST", connect=_Spy()
+        )
         assert code == 400 and "cypher" in payload["error"]
 
-    code, payload = srv.route("/api/query", "", b"{not json", _settings(), method="POST", connect=_Spy())
+    code, payload = srv.route(
+        "/api/query", "", b"{not json", _settings(), method="POST", connect=_Spy()
+    )
     assert code == 400 and "invalid JSON" in payload["error"]
 
-    code, payload = srv.route("/api/query", "", b'["a list"]', _settings(), method="POST", connect=_Spy())
+    code, payload = srv.route(
+        "/api/query", "", b'["a list"]', _settings(), method="POST", connect=_Spy()
+    )
     assert code == 400
 
-    code, payload = srv.route("/api/query", "", {"cypher": "MATCH (n) RETURN n " + "x" * 9000},
-                              _settings(), method="POST", connect=_Spy())
+    code, payload = srv.route(
+        "/api/query",
+        "",
+        {"cypher": "MATCH (n) RETURN n " + "x" * 9000},
+        _settings(),
+        method="POST",
+        connect=_Spy(),
+    )
     assert code == 400 and "too long" in payload["error"]
 
 
 # ---------------------------------------- GET /api/labels/<label>/sample ----
 def test_label_sample_rejects_non_identifier_labels():
-    bad = ["Foo;DROP", "Foo`) DETACH DELETE (n", "1Foo", "Foo Bar", "Foo-Bar",
-           "..", "Foo%60", "Foo%3BDROP", "*"]
+    bad = [
+        "Foo;DROP",
+        "Foo`) DETACH DELETE (n",
+        "1Foo",
+        "Foo Bar",
+        "Foo-Bar",
+        "..",
+        "Foo%60",
+        "Foo%3BDROP",
+        "*",
+    ]
     for label in bad:
         spy = _Spy()
         code, payload = srv.route(f"/api/labels/{label}/sample", "", None, _settings(), connect=spy)
@@ -222,16 +259,19 @@ def test_label_sample_accepts_a_plain_identifier():
 
 # ------------------------------------- GET /api/node/<id>/neighbors --------
 def test_node_neighbors_decodes_the_id_and_passes_it_as_a_parameter():
-    spy = _Spy(rows=[{"rel": "CALLS", "fromId": "a", "neighborId": "b", "neighborLabels": ["Method"]}])
-    code, payload = srv.route("/api/node/pkg%2FFile.java/neighbors", "limit=9999",
-                              None, _settings(), connect=spy)
+    spy = _Spy(
+        rows=[{"rel": "CALLS", "fromId": "a", "neighborId": "b", "neighborLabels": ["Method"]}]
+    )
+    code, payload = srv.route(
+        "/api/node/pkg%2FFile.java/neighbors", "limit=9999", None, _settings(), connect=spy
+    )
     assert code == 200
     assert payload["id"] == "pkg/File.java"
     assert payload["neighbors"][0]["rel"] == "CALLS"
     cypher, params = spy.executed[0]
     assert params["id"] == "pkg/File.java"
     assert params["limit"] == srv.MAX_LIMIT  # capped
-    assert "pkg/File.java" not in cypher     # never interpolated into the query text
+    assert "pkg/File.java" not in cypher  # never interpolated into the query text
 
 
 def test_node_neighbors_rejects_blank_and_oversized_ids():
@@ -264,8 +304,9 @@ def test_search_validates_its_input():
 
 def test_search_with_a_label_uses_search_nodes():
     spy = _Spy(rows=[{"n": {"id": "c1", "name": "Foo", "path": "src/Foo.java"}}])
-    code, payload = srv.route("/api/search", "q=Foo&label=Class&limit=100000",
-                              None, _settings(), connect=spy)
+    code, payload = srv.route(
+        "/api/search", "q=Foo&label=Class&limit=100000", None, _settings(), connect=spy
+    )
     assert code == 200
     assert payload["label"] == "Class" and payload["prop"] == "name"
     assert payload["results"][0]["name"] == "Foo"
@@ -285,8 +326,20 @@ def test_search_without_a_label_is_generic_and_parameterised():
 # ------------------------------------------------- GET /api/graph/sample ---
 def test_graph_sample_caps_the_limit_and_builds_nodes_and_links():
     rows = [
-        {"source": "a", "sourceLabel": "Class", "target": "b", "targetLabel": "Method", "type": "DECLARES"},
-        {"source": "a", "sourceLabel": "Class", "target": "c", "targetLabel": "Method", "type": "DECLARES"},
+        {
+            "source": "a",
+            "sourceLabel": "Class",
+            "target": "b",
+            "targetLabel": "Method",
+            "type": "DECLARES",
+        },
+        {
+            "source": "a",
+            "sourceLabel": "Class",
+            "target": "c",
+            "targetLabel": "Method",
+            "type": "DECLARES",
+        },
     ]
     spy = _Spy(rows=rows)
     code, payload = srv.route("/api/graph/sample", "limit=100000", None, _settings(), connect=spy)
@@ -312,9 +365,15 @@ def test_schema_endpoint_shape():
     # Busiest first, and carrying counts: 25 alphabetical names with no numbers
     # tell the reader nothing about the graph they are looking at.
     assert payload["relationshipTypes"] == [
-        {"name": "CALLS", "count": 9}, {"name": "DECLARES", "count": 2}]
-    assert payload["totals"] == {"labels": 2, "relationshipTypes": 2,
-                                 "nodes": 14, "relationships": 11}
+        {"name": "CALLS", "count": 9},
+        {"name": "DECLARES", "count": 2},
+    ]
+    assert payload["totals"] == {
+        "labels": 2,
+        "relationshipTypes": 2,
+        "nodes": 14,
+        "relationships": 11,
+    }
 
 
 def test_schema_payload_tolerates_a_ragged_schema():
@@ -328,8 +387,13 @@ def test_unreachable_graph_reports_503_not_500():
     def boom(_settings):
         raise RuntimeError("no route to host")
 
-    for path in ("/api/schema", "/api/graph/sample", "/api/search?q=x",
-                 "/api/labels/Class/sample", "/api/node/a/neighbors"):
+    for path in (
+        "/api/schema",
+        "/api/graph/sample",
+        "/api/search?q=x",
+        "/api/labels/Class/sample",
+        "/api/node/a/neighbors",
+    ):
         code, payload = srv.route(path, "", None, _settings(), connect=boom)
         assert code == 503, path
         assert "no route to host" in payload["error"]
@@ -353,7 +417,7 @@ def test_unknown_paths_are_404():
 # ------------------------------------------------------------- limits ------
 def test_limits_are_clamped():
     assert srv.clamp_limit("999999", 20) == srv.MAX_LIMIT
-    assert srv.clamp_limit(10 ** 9, 20) == srv.MAX_LIMIT
+    assert srv.clamp_limit(10**9, 20) == srv.MAX_LIMIT
     assert srv.clamp_limit("0", 20) == 1
     assert srv.clamp_limit("-5", 20) == 1
     assert srv.clamp_limit("abc", 20) == 20
@@ -377,8 +441,14 @@ def test_every_endpoint_caps_its_limit():
         assert spy.executed[0][1][key] == srv.MAX_LIMIT, path
 
     spy = _Spy()
-    srv.route("/api/query", "", {"cypher": "MATCH (n) RETURN n", "limit": 100000},
-              _settings(), method="POST", connect=spy)
+    srv.route(
+        "/api/query",
+        "",
+        {"cypher": "MATCH (n) RETURN n", "limit": 100000},
+        _settings(),
+        method="POST",
+        connect=spy,
+    )
     cypher, _ = spy.executed[0]
     assert f"LIMIT {srv.MAX_LIMIT}" in cypher
 
@@ -406,18 +476,21 @@ def test_status_route_masks_passwords():
     assert "topsecret" not in blob and "dbsecret" not in blob
 
 
-@pytest.mark.parametrize("authority,expected", [
-    ("127.0.0.1", True),
-    ("127.0.0.1:8000", True),
-    ("localhost:8000", True),
-    ("[::1]:8000", True),
-    ("::1", True),
-    ("evil.com", False),
-    ("evil.com:8000", False),
-    ("127.0.0.1.evil.com", False),
-    ("user@evil.com", False),
-    ("", False),
-])
+@pytest.mark.parametrize(
+    "authority,expected",
+    [
+        ("127.0.0.1", True),
+        ("127.0.0.1:8000", True),
+        ("localhost:8000", True),
+        ("[::1]:8000", True),
+        ("::1", True),
+        ("evil.com", False),
+        ("evil.com:8000", False),
+        ("127.0.0.1.evil.com", False),
+        ("user@evil.com", False),
+        ("", False),
+    ],
+)
 def test_is_loopback_host_reads_the_authority_not_the_string(authority, expected):
     assert srv.is_loopback_host(authority) is expected
 
@@ -441,9 +514,11 @@ def test_a_foreign_origin_is_refused_before_the_route_runs():
     try:
         for headers in ({"Origin": "https://evil.example"}, {"Origin": "null"}):
             request = urllib.request.Request(
-                base + "/api/query", method="POST",
+                base + "/api/query",
+                method="POST",
                 data=json.dumps({"cypher": "MATCH (n) RETURN n"}).encode("utf-8"),
-                headers={"Content-Type": "text/plain", **headers})
+                headers={"Content-Type": "text/plain", **headers},
+            )
             try:
                 urllib.request.urlopen(request, timeout=10)
                 raise AssertionError(f"server accepted a cross-origin POST: {headers}")
@@ -453,8 +528,7 @@ def test_a_foreign_origin_is_refused_before_the_route_runs():
 
         # DNS rebinding: evil.com can be pointed at 127.0.0.1, so a loopback-bound
         # server must refuse any Host that is not itself loopback.
-        request = urllib.request.Request(
-            base + "/api/status", headers={"Host": "evil.example"})
+        request = urllib.request.Request(base + "/api/status", headers={"Host": "evil.example"})
         try:
             urllib.request.urlopen(request, timeout=10)
             raise AssertionError("server answered a rebound Host header")
@@ -471,8 +545,13 @@ def test_a_foreign_origin_is_refused_before_the_route_runs():
 def test_the_console_says_why_a_query_was_denied():
     """Every denial used to claim to be a write, whatever the real reason was."""
     code, payload = srv.route(
-        "/api/query", "", {"cypher": "CALL apoc.load.json('http://x/')"},
-        _settings(), method="POST", connect=_Spy())
+        "/api/query",
+        "",
+        {"cypher": "CALL apoc.load.json('http://x/')"},
+        _settings(),
+        method="POST",
+        connect=_Spy(),
+    )
     assert code == 400
     assert "apoc.load.json" in payload["error"], payload
     assert "not allowlisted" in payload["error"], payload
@@ -493,9 +572,11 @@ def test_handler_serves_the_shell_and_rejects_writes_over_the_wire():
             assert "graphforge" in resp.read().decode("utf-8")
 
         request = urllib.request.Request(
-            base + "/api/query", method="POST",
+            base + "/api/query",
+            method="POST",
             data=json.dumps({"cypher": "MATCH (n) DELETE n"}).encode("utf-8"),
-            headers={"Content-Type": "application/json"})
+            headers={"Content-Type": "application/json"},
+        )
         try:
             urllib.request.urlopen(request, timeout=10)
             raise AssertionError("the server accepted a write query")

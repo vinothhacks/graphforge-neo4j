@@ -3,6 +3,7 @@
 Values are read from the process environment (optionally seeded from a local
 `.env` file via python-dotenv). CLI flags may override individual fields.
 """
+
 from __future__ import annotations
 
 import os
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - dotenv is a core dep but keep import soft
+
     def load_dotenv(*_args, **_kwargs):  # type: ignore
         return False
 

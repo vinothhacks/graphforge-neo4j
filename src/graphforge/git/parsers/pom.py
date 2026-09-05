@@ -1,4 +1,5 @@
 """Parse Maven pom.xml into module coordinates and dependencies."""
+
 from __future__ import annotations
 
 import xml.etree.ElementTree as ET
@@ -19,8 +20,12 @@ def _text(element, path: str) -> str:
 def parse_pom(pom_path: str) -> dict[str, Any]:
     """Return groupId/artifactId/version/packaging/name + dependency list."""
     result: dict[str, Any] = {
-        "groupId": "", "artifactId": "", "version": "",
-        "packaging": "jar", "name": "", "dependencies": [],
+        "groupId": "",
+        "artifactId": "",
+        "version": "",
+        "packaging": "jar",
+        "name": "",
+        "dependencies": [],
     }
     try:
         root = ET.parse(pom_path).getroot()
@@ -45,10 +50,12 @@ def parse_pom(pom_path: str) -> dict[str, Any]:
         deps_elem = root.find("dependencies")
     if deps_elem is not None:
         for dep in deps_elem:
-            result["dependencies"].append({
-                "groupId": _text(dep, "groupId"),
-                "artifactId": _text(dep, "artifactId"),
-                "version": _text(dep, "version"),
-                "scope": _text(dep, "scope") or "compile",
-            })
+            result["dependencies"].append(
+                {
+                    "groupId": _text(dep, "groupId"),
+                    "artifactId": _text(dep, "artifactId"),
+                    "version": _text(dep, "version"),
+                    "scope": _text(dep, "scope") or "compile",
+                }
+            )
     return result

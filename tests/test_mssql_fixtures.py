@@ -1,4 +1,5 @@
 """MSSQL extractor against recorded INFORMATION_SCHEMA rows — no live server."""
+
 from __future__ import annotations
 
 import json

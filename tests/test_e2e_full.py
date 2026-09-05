@@ -1,4 +1,5 @@
 """Playground E2E: Postgres + Neo4j + graphforge MCP stdio. GF_E2E_FULL=1."""
+
 from __future__ import annotations
 
 import asyncio
@@ -20,8 +21,7 @@ pytestmark = pytest.mark.e2e_full
 
 _URI = os.getenv("GF_IT_NEO4J_URI", os.getenv("NEO4J_URI", "bolt://127.0.0.1:7687"))
 _USER = os.getenv("GF_IT_NEO4J_USER", os.getenv("NEO4J_USER", "neo4j"))
-_PASSWORD = os.getenv(
-    "GF_IT_NEO4J_PASSWORD", os.getenv("NEO4J_PASSWORD", "graphforge-playground"))
+_PASSWORD = os.getenv("GF_IT_NEO4J_PASSWORD", os.getenv("NEO4J_PASSWORD", "graphforge-playground"))
 _DB = os.getenv("GF_IT_NEO4J_DATABASE", os.getenv("NEO4J_DATABASE", "neo4j"))
 _PG = os.getenv(
     "GF_IT_PG_URL",
@@ -34,8 +34,16 @@ def _neo():
 
 
 def _flags():
-    return ["--neo4j-uri", _URI, "--neo4j-user", _USER,
-            "--neo4j-password", _PASSWORD, "--neo4j-database", _DB]
+    return [
+        "--neo4j-uri",
+        _URI,
+        "--neo4j-user",
+        _USER,
+        "--neo4j-password",
+        _PASSWORD,
+        "--neo4j-database",
+        _DB,
+    ]
 
 
 def _git(cwd, *args):
@@ -68,12 +76,13 @@ def test_incremental_and_degrades(tmp_path):
     gq = GraphQuery.connect(_neo())
     try:
         files = gq.read_cypher(
-            "MATCH (f:File) WHERE f.repo = $r RETURN f.path AS p",
-            {"r": name}, limit=50)
+            "MATCH (f:File) WHERE f.repo = $r RETURN f.path AS p", {"r": name}, limit=50
+        )
         paths = " ".join(r.get("p") or "" for r in files)
         assert "a.py" in paths and "b.py" in paths
-        assert main(["git", str(d), "--name", name, "--since-commit", "deadbeef" * 5,
-                     *_flags()]) == 0
+        assert (
+            main(["git", str(d), "--name", name, "--since-commit", "deadbeef" * 5, *_flags()]) == 0
+        )
     finally:
         gq.close()
 
@@ -97,7 +106,8 @@ def test_sample_rows_and_link():
     gq = GraphQuery.connect(_neo())
     try:
         rows = gq.read_cypher(
-            "MATCH (t:Table) WHERE t.approxRows IS NOT NULL RETURN t.name AS n LIMIT 5")
+            "MATCH (t:Table) WHERE t.approxRows IS NOT NULL RETURN t.name AS n LIMIT 5"
+        )
         assert rows, "approxRows not populated"
         assert main(["link", "--maps-to", *_flags()]) == 0
         assert main(["link", "--based-on", "--min-table-name-len", "4", *_flags()]) == 0
@@ -106,7 +116,8 @@ def test_sample_rows_and_link():
         assert main(["link", *_flags()]) == 0
         edges = gq.read_cypher(
             "MATCH ()-[r:MAPS_TO|BASED_ON|USES_TABLE|CROSS_DB_REFERENCE]->() "
-            "RETURN type(r) AS t, count(*) AS c")
+            "RETURN type(r) AS t, count(*) AS c"
+        )
         counts = {r["t"]: r["c"] for r in edges}
         assert sum(counts.values()) >= 0
         assert counts  # at least one link type produced edges on the shop schema
@@ -132,8 +143,9 @@ async def _walk_pages(session, name: str, args: dict, limit: int = 2) -> list:
     keys: set[str] = set()
     total = None
     while True:
-        payload = _tool_json(await session.call_tool(
-            name, {**args, "limit": limit, "offset": offset}))
+        payload = _tool_json(
+            await session.call_tool(name, {**args, "limit": limit, "offset": offset})
+        )
         assert set(payload) >= {"rows", "total", "limit", "offset", "hasMore"}
         total = payload["total"]
         for row in payload["rows"]:
@@ -155,10 +167,14 @@ def test_mcp_stdio_tools_pagination_and_caveat():
     from mcp.client.stdio import stdio_client
 
     env = os.environ.copy()
-    env.update({
-        "NEO4J_URI": _URI, "NEO4J_USER": _USER,
-        "NEO4J_PASSWORD": _PASSWORD, "NEO4J_DATABASE": _DB,
-    })
+    env.update(
+        {
+            "NEO4J_URI": _URI,
+            "NEO4J_USER": _USER,
+            "NEO4J_PASSWORD": _PASSWORD,
+            "NEO4J_DATABASE": _DB,
+        }
+    )
     params = StdioServerParameters(command="graphforge", args=["mcp"], env=env)
 
     async def _run():
@@ -166,40 +182,47 @@ def test_mcp_stdio_tools_pagination_and_caveat():
             await session.initialize()
             tools = {t.name for t in (await session.list_tools()).tools}
             expected = {
-                "get_schema", "read_cypher", "search_nodes", "node_neighbors",
-                "find_code", "search_codebase", "find_table", "find_procedure",
-                "impact_of_column", "explain_impact", "find_dead_code",
+                "get_schema",
+                "read_cypher",
+                "search_nodes",
+                "node_neighbors",
+                "find_code",
+                "search_codebase",
+                "find_table",
+                "find_procedure",
+                "impact_of_column",
+                "explain_impact",
+                "find_dead_code",
                 "blast_radius_of_file",
             }
             assert expected <= tools
             for name in expected:
                 if name == "read_cypher":
                     result = await session.call_tool(
-                        name, {"query": "MATCH (n) RETURN count(n) AS c", "limit": 1})
+                        name, {"query": "MATCH (n) RETURN count(n) AS c", "limit": 1}
+                    )
                 elif name == "search_nodes":
                     result = await session.call_tool(
-                        name, {"label": "File", "prop": "name", "value": "a",
-                               "limit": 2, "offset": 0})
-                elif name in ("find_code", "find_table", "find_procedure",
-                              "search_codebase"):
+                        name,
+                        {"label": "File", "prop": "name", "value": "a", "limit": 2, "offset": 0},
+                    )
+                elif name in ("find_code", "find_table", "find_procedure", "search_codebase"):
                     args = {"text": "a", "limit": 2}
                     if name == "search_codebase":
                         args["kind"] = "all"
                     result = await session.call_tool(name, args)
                 elif name == "node_neighbors":
-                    result = await session.call_tool(
-                        name, {"node_id": "missing", "limit": 1})
+                    result = await session.call_tool(name, {"node_id": "missing", "limit": 1})
                 elif name == "impact_of_column":
                     result = await session.call_tool(name, {"column": "id"})
                 elif name == "explain_impact":
-                    result = await session.call_tool(
-                        name, {"target": "id", "kind": "auto"})
+                    result = await session.call_tool(name, {"target": "id", "kind": "auto"})
                 elif name == "find_dead_code":
                     result = await session.call_tool(
-                        name, {"repo": "e2e-inc", "days": 180, "limit": 5})
+                        name, {"repo": "e2e-inc", "days": 180, "limit": 5}
+                    )
                 elif name == "blast_radius_of_file":
-                    result = await session.call_tool(
-                        name, {"path": "Hello.py"})
+                    result = await session.call_tool(name, {"path": "Hello.py"})
                 else:
                     result = await session.call_tool(name, {})
                 assert result.isError is not True, (name, _tool_text(result))
@@ -210,7 +233,8 @@ def test_mcp_stdio_tools_pagination_and_caveat():
                 assert denied.isError or "read-only" in blob, cypher
 
             dead = await session.call_tool(
-                "find_dead_code", {"repo": "e2e-inc", "days": 1, "limit": 5})
+                "find_dead_code", {"repo": "e2e-inc", "days": 1, "limit": 5}
+            )
             body = _tool_text(dead)
             assert DEAD_CODE_CAVEAT in body
 
@@ -223,11 +247,10 @@ def test_mcp_stdio_tools_pagination_and_caveat():
             assert bypass.isError is not True
 
             await _walk_pages(
-                session, "search_nodes",
-                {"label": "File", "prop": "name", "value": "a"})
+                session, "search_nodes", {"label": "File", "prop": "name", "value": "a"}
+            )
             await _walk_pages(session, "find_code", {"text": "a"})
             await _walk_pages(session, "find_table", {"text": "a"})
-            await _walk_pages(
-                session, "search_codebase", {"text": "a", "kind": "all"})
+            await _walk_pages(session, "search_codebase", {"text": "a", "kind": "all"})
 
     asyncio.run(_run())

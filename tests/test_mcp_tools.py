@@ -4,6 +4,7 @@ Everything runs against a fake driver that records the Cypher and parameters it 
 handed and replays canned rows, so no live Neo4j is needed. The cache tests drive an
 injected clock rather than sleeping.
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -138,21 +139,30 @@ def test_legacy_positional_calls_return_the_old_shapes():
     assert type(graph.find_procedure("sp_", 5)) is list
     assert type(graph.read_cypher("MATCH (n) RETURN n")) is list
 
-    schema_driver = FakeDriver(script=[
-        ("db.labels", [{"label": "Class"}]),
-        ("db.relationshipTypes", [{"relationshipType": "IMPORTS"}]),
-        ("count(n) AS c", [{"c": 7}]),
-        ("count(r) AS c", [{"c": 4}]),
-    ])
+    schema_driver = FakeDriver(
+        script=[
+            ("db.labels", [{"label": "Class"}]),
+            ("db.relationshipTypes", [{"relationshipType": "IMPORTS"}]),
+            ("count(n) AS c", [{"c": 7}]),
+            ("count(r) AS c", [{"c": 4}]),
+        ]
+    )
     schema = GraphQuery(schema_driver, "neo4j").get_schema()
-    assert schema == {"labels": ["Class"], "relationshipTypes": ["IMPORTS"],
-                      "nodeCountsByLabel": {"Class": 7},
-                      "relationshipCountsByType": {"IMPORTS": 4}}
+    assert schema == {
+        "labels": ["Class"],
+        "relationshipTypes": ["IMPORTS"],
+        "nodeCountsByLabel": {"Class": 7},
+        "relationshipCountsByType": {"IMPORTS": 4},
+    }
 
 
 def test_search_nodes_rejects_injected_identifiers_as_before():
     graph = GraphQuery(FakeDriver(), "neo4j")
-    for label, prop in (("Foo`) DETACH DELETE (n", "name"), ("Class", "name;DROP"), ("1Foo", "name")):
+    for label, prop in (
+        ("Foo`) DETACH DELETE (n", "name"),
+        ("Class", "name;DROP"),
+        ("1Foo", "name"),
+    ):
         with pytest.raises(ValueError):
             graph.search_nodes(label, prop, "x")
         with pytest.raises(ValueError):
@@ -162,11 +172,18 @@ def test_search_nodes_rejects_injected_identifiers_as_before():
 
 def test_read_cypher_still_rejects_writes():
     graph = GraphQuery(FakeDriver(), "neo4j")
-    for cypher in ("MATCH (n) DELETE n", "CREATE (x)", "MATCH (n) SET n.x=1",
-                   "MERGE (a:Thing {id: 1})", "MATCH (n) DETACH DELETE n",
-                   "match (n) delete n", "MATCH (n) RETURN n; CREATE (evil)",
-                   "MATCH (n) REMOVE n.flag RETURN n", "DROP INDEX node_id",
-                   "CALL apoc.create.node(['X'], {})"):
+    for cypher in (
+        "MATCH (n) DELETE n",
+        "CREATE (x)",
+        "MATCH (n) SET n.x=1",
+        "MERGE (a:Thing {id: 1})",
+        "MATCH (n) DETACH DELETE n",
+        "match (n) delete n",
+        "MATCH (n) RETURN n; CREATE (evil)",
+        "MATCH (n) REMOVE n.flag RETURN n",
+        "DROP INDEX node_id",
+        "CALL apoc.create.node(['X'], {})",
+    ):
         with pytest.raises(ValueError):
             graph.read_cypher(cypher)
     assert graph.driver.executed == [], "a write reached the database"
@@ -205,7 +222,9 @@ def test_a_standalone_call_is_capped_without_being_made_invalid():
     driver = FakeDriver(rows=[{"label": f"L{i}"} for i in range(50)])
     graph = GraphQuery(driver, "neo4j")
     rows = graph.read_cypher("CALL db.labels()", limit=10)
-    assert "LIMIT" not in graph.driver.cyphers[0].upper(), "appending LIMIT breaks a standalone CALL"
+    assert "LIMIT" not in graph.driver.cyphers[0].upper(), (
+        "appending LIMIT breaks a standalone CALL"
+    )
     assert len(rows) == 10, "a standalone CALL returned more rows than the cap"
 
 
@@ -221,19 +240,42 @@ def test_ui_routes_still_work_over_the_new_module():
     code, payload = ui.route("/api/search", "q=Foo&label=Class", None, _settings(), connect=connect)
     assert code == 200 and payload["results"][0]["name"] == "Foo"
 
-    code, payload = ui.route("/api/query", "", {"cypher": "MATCH (n) RETURN n"},
-                             _settings(), method="POST", connect=connect)
+    code, payload = ui.route(
+        "/api/query",
+        "",
+        {"cypher": "MATCH (n) RETURN n"},
+        _settings(),
+        method="POST",
+        connect=connect,
+    )
     assert code == 200 and payload["count"] == 1
 
-    code, payload = ui.route("/api/query", "", {"cypher": "MATCH (n) DELETE n"},
-                             _settings(), method="POST", connect=connect)
+    code, payload = ui.route(
+        "/api/query",
+        "",
+        {"cypher": "MATCH (n) DELETE n"},
+        _settings(),
+        method="POST",
+        connect=connect,
+    )
     assert code == 400 and payload["error"]
 
-    code, payload = ui.route("/api/schema", "", None, _settings(),
-                             connect=lambda _s: GraphQuery(FakeDriver(script=[
-                                 ("db.labels", [{"label": "Class"}]),
-                                 ("db.relationshipTypes", []),
-                                 ("count(n) AS c", [{"c": 4}])]), "neo4j"))
+    code, payload = ui.route(
+        "/api/schema",
+        "",
+        None,
+        _settings(),
+        connect=lambda _s: GraphQuery(
+            FakeDriver(
+                script=[
+                    ("db.labels", [{"label": "Class"}]),
+                    ("db.relationshipTypes", []),
+                    ("count(n) AS c", [{"c": 4}]),
+                ]
+            ),
+            "neo4j",
+        ),
+    )
     assert code == 200 and payload["labels"] == [{"name": "Class", "count": 4}]
 
 
@@ -276,13 +318,20 @@ def test_empty_page_past_the_end_is_not_more():
 
 
 def test_find_code_and_find_table_pages_share_the_shape_and_the_where_clause():
-    for method, page_method, needle in (("find_code", "find_code_page", "n:File OR n:Class OR n:Method"),
-                                        ("find_table", "find_table_page", "n:Table OR n:Column")):
+    for method, page_method, needle in (
+        ("find_code", "find_code_page", "n:File OR n:Class OR n:Method"),
+        ("find_table", "find_table_page", "n:Table OR n:Column"),
+    ):
         driver = _page_driver([{"name": "orders"}], total=4)
         graph = GraphQuery(driver, "neo4j")
         page = getattr(graph, page_method)("ord", 1, 2)
-        assert page == {"rows": [{"name": "orders"}], "total": 4, "limit": 1,
-                        "offset": 2, "hasMore": True}, method
+        assert page == {
+            "rows": [{"name": "orders"}],
+            "total": 4,
+            "limit": 1,
+            "offset": 2,
+            "hasMore": True,
+        }, method
         rows_cypher, rows_params = driver.executed[0]
         count_cypher, count_params = driver.one("count(n) AS total")
         assert needle in rows_cypher and needle in count_cypher, method
@@ -344,15 +393,15 @@ def test_search_codebase_kind_all_covers_code_and_schema():
 def test_search_codebase_honours_repo_limit_and_offset():
     driver = _page_driver([{"name": "a"}], total=9)
     page = GraphQuery(driver, "neo4j").search_codebase(
-        "a", kind="code", repo="svc", limit=1, offset=2)
+        "a", kind="code", repo="svc", limit=1, offset=2
+    )
     cypher, params = driver.executed[0]
     assert "n.repo = $repo" in cypher
     assert params == {"t": "a", "limit": 1, "offset": 2, "repo": "svc"}
     count_cypher, count_params = driver.one("count(n) AS total")
     assert "n.repo = $repo" in count_cypher
     assert count_params == {"t": "a", "repo": "svc"}
-    assert page == {"rows": [{"name": "a"}], "total": 9, "limit": 1,
-                    "offset": 2, "hasMore": True}
+    assert page == {"rows": [{"name": "a"}], "total": 9, "limit": 1, "offset": 2, "hasMore": True}
 
 
 def test_search_codebase_omits_repo_param_when_blank():
@@ -381,17 +430,24 @@ def test_find_code_where_is_case_insensitive():
 def test_search_codebase_page_matches_find_code_page():
     driver = _page_driver([{"name": "orders"}], total=4)
     page = GraphQuery(driver, "neo4j").search_codebase("ord", limit=1, offset=2)
-    assert page == {"rows": [{"name": "orders"}], "total": 4, "limit": 1,
-                    "offset": 2, "hasMore": True}
+    assert page == {
+        "rows": [{"name": "orders"}],
+        "total": 4,
+        "limit": 1,
+        "offset": 2,
+        "hasMore": True,
+    }
 
 
 # =============================================================== schema cache ==
 def _schema_driver(count=1):
-    return FakeDriver(script=[
-        ("db.labels", [{"label": "Class"}]),
-        ("db.relationshipTypes", [{"relationshipType": "IMPORTS"}]),
-        ("count(n) AS c", [{"c": count}]),
-    ])
+    return FakeDriver(
+        script=[
+            ("db.labels", [{"label": "Class"}]),
+            ("db.relationshipTypes", [{"relationshipType": "IMPORTS"}]),
+            ("count(n) AS c", [{"c": count}]),
+        ]
+    )
 
 
 def _label_queries(driver):
@@ -522,19 +578,60 @@ _IMPACT_SCRIPT = [
     # ordered: the link/entity needles must be tried before the plainer ones,
     # because the UNION queries also mention (v:View) / (p:StoredProcedure)
     ("MATCH (t:Table) WHERE toLower(t.name) = toLower($target)", []),
-    ("BASED_ON", [{"kind": "View", "database": "sales", "name": "v_daily", "table": "orders"},
-                  {"kind": "StoredProcedure", "database": "sales", "name": "sp_close_order",
-                   "table": "orders"}]),
-    ("MAPS_TO", [{"repo": "erp", "entity": "com.acme.Order", "name": "Order",
-                  "table": "orders", "via": "MAPS_TO"}]),
-    ("MATCH (c:Column)", [{"database": "sales", "table": "orders", "column": "order_id",
-                           "dataType": "int"},
-                          {"database": "sales", "table": "order_line", "column": "order_id",
-                           "dataType": "int"}]),
-    ("FOREIGN_KEY", [{"fromTable": "order_line", "fromColumn": "order_id",
-                      "toTable": "orders", "toColumn": "order_id"}]),
-    ("MATCH (i:Index)", [{"database": "sales", "table": "orders", "name": "ix_order",
-                          "columns": ["order_id"], "isUnique": True}]),
+    (
+        "BASED_ON",
+        [
+            {"kind": "View", "database": "sales", "name": "v_daily", "table": "orders"},
+            {
+                "kind": "StoredProcedure",
+                "database": "sales",
+                "name": "sp_close_order",
+                "table": "orders",
+            },
+        ],
+    ),
+    (
+        "MAPS_TO",
+        [
+            {
+                "repo": "erp",
+                "entity": "com.acme.Order",
+                "name": "Order",
+                "table": "orders",
+                "via": "MAPS_TO",
+            }
+        ],
+    ),
+    (
+        "MATCH (c:Column)",
+        [
+            {"database": "sales", "table": "orders", "column": "order_id", "dataType": "int"},
+            {"database": "sales", "table": "order_line", "column": "order_id", "dataType": "int"},
+        ],
+    ),
+    (
+        "FOREIGN_KEY",
+        [
+            {
+                "fromTable": "order_line",
+                "fromColumn": "order_id",
+                "toTable": "orders",
+                "toColumn": "order_id",
+            }
+        ],
+    ),
+    (
+        "MATCH (i:Index)",
+        [
+            {
+                "database": "sales",
+                "table": "orders",
+                "name": "ix_order",
+                "columns": ["order_id"],
+                "isUnique": True,
+            }
+        ],
+    ),
     ("MATCH (p:StoredProcedure)", [{"database": "sales", "procedure": "sp_close_order"}]),
     ("MATCH (v:View)", [{"database": "sales", "view": "v_open_orders"}]),
 ]
@@ -566,8 +663,9 @@ def test_explain_impact_records_how_each_transitive_hit_was_found():
     views = {row["view"]: row["via"] for row in report["transitive"]["views"]}
     assert views == {"v_daily": ["link"], "v_open_orders": ["definition"]}
     procs = report["transitive"]["storedProcedures"]
-    assert procs == [{"database": "sales", "procedure": "sp_close_order",
-                      "via": ["definition", "link"]}], "text + link evidence must merge"
+    assert procs == [
+        {"database": "sales", "procedure": "sp_close_order", "via": ["definition", "link"]}
+    ], "text + link evidence must merge"
 
 
 def test_explain_impact_looks_for_entities_by_mapped_table_and_by_maps_to():
@@ -582,8 +680,10 @@ def test_explain_impact_looks_for_entities_by_mapped_table_and_by_maps_to():
 
 def test_explain_impact_auto_detects_a_table_and_scopes_its_queries():
     script = list(_IMPACT_SCRIPT)
-    script[0] = ("MATCH (t:Table) WHERE toLower(t.name) = toLower($target)",
-                 [{"database": "sales", "schema": "dbo", "name": "orders"}])
+    script[0] = (
+        "MATCH (t:Table) WHERE toLower(t.name) = toLower($target)",
+        [{"database": "sales", "schema": "dbo", "name": "orders"}],
+    )
     driver = FakeDriver(script=script)
     report = GraphQuery(driver, "neo4j").explain_impact("orders")
 
@@ -598,8 +698,10 @@ def test_explain_impact_auto_detects_a_table_and_scopes_its_queries():
 
 def test_explain_impact_can_be_forced_to_read_a_name_as_a_column():
     script = list(_IMPACT_SCRIPT)
-    script[0] = ("MATCH (t:Table) WHERE toLower(t.name) = toLower($target)",
-                 [{"database": "sales", "schema": "dbo", "name": "orders"}])
+    script[0] = (
+        "MATCH (t:Table) WHERE toLower(t.name) = toLower($target)",
+        [{"database": "sales", "schema": "dbo", "name": "orders"}],
+    )
     driver = FakeDriver(script=script)
     report = GraphQuery(driver, "neo4j").explain_impact("orders", kind="column")
     assert report["kind"] == "column"
@@ -625,15 +727,31 @@ def test_explain_impact_with_no_matches_skips_the_join_queries():
 
 # ============================================================== find_dead_code ==
 _DEAD_SCRIPT = [
-    ("RETURN f.path AS path", [
-        {"path": "src/legacy/Unused.java", "repo": "erp",
-         "lastChanged": "2019-04-02", "classes": ["com.acme.Unused"]},
-        {"path": "src/legacy/Orphan.java", "repo": "erp", "lastChanged": "", "classes": []},
-    ]),
-    ("RETURN cls.fqn AS fqn", [
-        {"fqn": "com.acme.Unused", "name": "Unused", "path": "src/legacy/Unused.java",
-         "repo": "erp", "lastChanged": "2019-04-02", "language": "java"},
-    ]),
+    (
+        "RETURN f.path AS path",
+        [
+            {
+                "path": "src/legacy/Unused.java",
+                "repo": "erp",
+                "lastChanged": "2019-04-02",
+                "classes": ["com.acme.Unused"],
+            },
+            {"path": "src/legacy/Orphan.java", "repo": "erp", "lastChanged": "", "classes": []},
+        ],
+    ),
+    (
+        "RETURN cls.fqn AS fqn",
+        [
+            {
+                "fqn": "com.acme.Unused",
+                "name": "Unused",
+                "path": "src/legacy/Unused.java",
+                "repo": "erp",
+                "lastChanged": "2019-04-02",
+                "language": "java",
+            },
+        ],
+    ),
 ]
 
 
@@ -672,9 +790,9 @@ def test_find_dead_code_tests_both_staleness_and_inbound_references():
         assert "lastChanged < $cutoff" in cypher, needle
         assert "lastChanged IS NULL OR lastChanged = ''" in cypher, needle
         assert "[:IMPORTS]->(ref:Class)" in cypher, needle
-        assert "ref.fqn = cls.fqn" in cypher, needle          # bridges the external stub node
+        assert "ref.fqn = cls.fqn" in cypher, needle  # bridges the external stub node
         assert "importerFile.repo = $repo" in cypher, needle  # same repo only
-        assert "importerFile <> f" in cypher, needle          # a file importing itself is not use
+        assert "importerFile <> f" in cypher, needle  # a file importing itself is not use
         assert "importers = 0" in cypher, needle
 
 
@@ -697,16 +815,30 @@ def test_find_dead_code_normalises_hostile_arguments():
 
 # ========================================================= blast_radius_of_file ==
 _BLAST_ROWS = [
-    {"file": "src/Order.java", "repo": "erp", "class": "com.acme.Order", "className": "Order",
-     "language": "java",
-     "methods": [{"name": "total", "visibility": "public", "line": 12},
-                 {"name": "close", "visibility": "private", "line": 30}],
-     "callers": [{"file": "src/Cart.java", "class": "com.acme.Cart", "repo": "erp"},
-                 {"file": "src/Invoice.java", "class": "com.acme.Invoice", "repo": "erp"}]},
-    {"file": "src/Order.java", "repo": "erp", "class": "com.acme.OrderLine",
-     "className": "OrderLine", "language": "java",
-     "methods": [{"name": "price", "visibility": "public", "line": 60}],
-     "callers": [{"file": "src/Cart.java", "class": "com.acme.Cart", "repo": "erp"}]},
+    {
+        "file": "src/Order.java",
+        "repo": "erp",
+        "class": "com.acme.Order",
+        "className": "Order",
+        "language": "java",
+        "methods": [
+            {"name": "total", "visibility": "public", "line": 12},
+            {"name": "close", "visibility": "private", "line": 30},
+        ],
+        "callers": [
+            {"file": "src/Cart.java", "class": "com.acme.Cart", "repo": "erp"},
+            {"file": "src/Invoice.java", "class": "com.acme.Invoice", "repo": "erp"},
+        ],
+    },
+    {
+        "file": "src/Order.java",
+        "repo": "erp",
+        "class": "com.acme.OrderLine",
+        "className": "OrderLine",
+        "language": "java",
+        "methods": [{"name": "price", "visibility": "public", "line": 60}],
+        "callers": [{"file": "src/Cart.java", "class": "com.acme.Cart", "repo": "erp"}],
+    },
 ]
 
 
@@ -741,10 +873,17 @@ def test_blast_radius_shapes_classes_methods_and_callers():
 
 def test_blast_radius_drops_the_null_placeholders_optional_match_collects():
     """A class with no methods and no callers yields collect()'d maps full of nulls."""
-    rows = [{"file": "src/Lonely.java", "repo": "erp", "class": "com.acme.Lonely",
-             "className": "Lonely", "language": "java",
-             "methods": [{"name": None, "visibility": None, "line": None}],
-             "callers": [{"file": None, "class": None, "repo": None}]}]
+    rows = [
+        {
+            "file": "src/Lonely.java",
+            "repo": "erp",
+            "class": "com.acme.Lonely",
+            "className": "Lonely",
+            "language": "java",
+            "methods": [{"name": None, "visibility": None, "line": None}],
+            "callers": [{"file": None, "class": None, "repo": None}],
+        }
+    ]
     out = GraphQuery(FakeDriver(rows=rows), "neo4j").blast_radius_of_file("src/Lonely.java")
     assert out["classes"][0]["methods"] == [] and out["classes"][0]["callers"] == []
     assert out["callers"] == []
@@ -753,8 +892,17 @@ def test_blast_radius_drops_the_null_placeholders_optional_match_collects():
 
 
 def test_blast_radius_of_a_file_with_no_classes():
-    rows = [{"file": "docs/readme.md", "repo": "erp", "class": None, "className": None,
-             "language": None, "methods": [], "callers": []}]
+    rows = [
+        {
+            "file": "docs/readme.md",
+            "repo": "erp",
+            "class": None,
+            "className": None,
+            "language": None,
+            "methods": [],
+            "callers": [],
+        }
+    ]
     out = GraphQuery(FakeDriver(rows=rows), "neo4j").blast_radius_of_file("docs/readme.md")
     assert out["found"] is True and out["classes"] == []
     assert out["counts"] == {"classes": 0, "methods": 0, "callerFiles": 0}
@@ -779,8 +927,9 @@ def _build_server_with_fakes(driver):
     # Inject the graph rather than monkeypatching GraphQuery.connect: the
     # connection is lazy now, so a patch that only spans build_server would
     # be long gone by the time a tool actually calls through.
-    server = mcp.build_server(Neo4jSettings(uri="bolt://x:7687", database="neo4j"),
-                              graph=GraphQuery(driver, "neo4j"))
+    server = mcp.build_server(
+        Neo4jSettings(uri="bolt://x:7687", database="neo4j"), graph=GraphQuery(driver, "neo4j")
+    )
     # Keep the {name: callable} shape the assertions below use. ``Tool.fn`` is the
     # undecorated function, so tools stay directly callable with their real
     # signatures and raised exceptions still propagate rather than being folded
@@ -815,9 +964,20 @@ def test_tools_are_registered_on_the_real_protocol_surface():
 
 def test_build_server_registers_every_documented_tool():
     server = _build_server_with_fakes(FakeDriver())
-    expected = {"get_schema", "read_cypher", "search_nodes", "node_neighbors", "find_code",
-                "search_codebase", "find_table", "find_procedure", "impact_of_column",
-                "explain_impact", "find_dead_code", "blast_radius_of_file"}
+    expected = {
+        "get_schema",
+        "read_cypher",
+        "search_nodes",
+        "node_neighbors",
+        "find_code",
+        "search_codebase",
+        "find_table",
+        "find_procedure",
+        "impact_of_column",
+        "explain_impact",
+        "find_dead_code",
+        "blast_radius_of_file",
+    }
     assert set(server.tools) == expected
     assert server.name == "graphforge"
     for name, fn in server.tools.items():
@@ -834,10 +994,12 @@ def test_module_docstring_lists_the_new_tools():
 def test_paged_tools_answer_with_rows_total_and_hasmore():
     driver = _page_driver([{"name": "orders"}], total=9)
     server = _build_server_with_fakes(driver)
-    for tool, args in (("search_nodes", ("Table", "name", "ord", 1, 0)),
-                       ("find_code", ("ord", 1, 0)),
-                       ("find_table", ("ord", 1, 0)),
-                       ("search_codebase", ("ord", "code", "", 1, 0))):
+    for tool, args in (
+        ("search_nodes", ("Table", "name", "ord", 1, 0)),
+        ("find_code", ("ord", 1, 0)),
+        ("find_table", ("ord", 1, 0)),
+        ("search_codebase", ("ord", "code", "", 1, 0)),
+    ):
         payload = json.loads(server.tools[tool](*args))
         assert payload["total"] == 9 and payload["hasMore"] is True, tool
         assert payload["limit"] == 1 and payload["offset"] == 0, tool
@@ -868,10 +1030,10 @@ def test_get_schema_tool_exposes_ttl_and_refresh():
     driver = _schema_driver()
     server = _build_server_with_fakes(driver)
     server.tools["get_schema"]()
-    server.tools["get_schema"]()          # served from the cache
+    server.tools["get_schema"]()  # served from the cache
     assert _label_queries(driver) == 1
     server.tools["get_schema"](refresh=True)
     assert _label_queries(driver) == 2
-    server.tools["get_schema"](0)         # ttl=0 bypasses
+    server.tools["get_schema"](0)  # ttl=0 bypasses
     assert _label_queries(driver) == 3
     mcp.clear_schema_cache()

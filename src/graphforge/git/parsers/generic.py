@@ -1,33 +1,87 @@
 """File-type table and line classification shared by all languages."""
+
 from __future__ import annotations
 
 import os
 
 # Map file extension -> logical file type stored on :File.type
 SUPPORTED_EXTENSIONS = {
-    ".java": "java", ".kt": "kotlin", ".kts": "kotlin", ".scala": "scala", ".groovy": "groovy",
-    ".py": "python", ".rb": "ruby", ".php": "php", ".go": "go", ".rs": "rust", ".swift": "swift",
-    ".cs": "csharp", ".c": "c", ".h": "c", ".cpp": "cpp", ".cc": "cpp", ".hpp": "cpp",
-    ".js": "javascript", ".jsx": "javascript", ".ts": "typescript", ".tsx": "typescript",
-    ".vue": "vue", ".sql": "sql",
-    ".xml": "xml", ".xhtml": "xml", ".html": "html", ".htm": "html",
-    ".css": "css", ".scss": "scss", ".sass": "sass", ".less": "less",
-    ".json": "json", ".yml": "yaml", ".yaml": "yaml", ".toml": "toml",
-    ".properties": "properties", ".gradle": "gradle", ".md": "markdown",
-    ".sh": "shell", ".bat": "batch", ".ps1": "powershell",
+    ".java": "java",
+    ".kt": "kotlin",
+    ".kts": "kotlin",
+    ".scala": "scala",
+    ".groovy": "groovy",
+    ".py": "python",
+    ".rb": "ruby",
+    ".php": "php",
+    ".go": "go",
+    ".rs": "rust",
+    ".swift": "swift",
+    ".cs": "csharp",
+    ".c": "c",
+    ".h": "c",
+    ".cpp": "cpp",
+    ".cc": "cpp",
+    ".hpp": "cpp",
+    ".js": "javascript",
+    ".jsx": "javascript",
+    ".ts": "typescript",
+    ".tsx": "typescript",
+    ".vue": "vue",
+    ".sql": "sql",
+    ".xml": "xml",
+    ".xhtml": "xml",
+    ".html": "html",
+    ".htm": "html",
+    ".css": "css",
+    ".scss": "scss",
+    ".sass": "sass",
+    ".less": "less",
+    ".json": "json",
+    ".yml": "yaml",
+    ".yaml": "yaml",
+    ".toml": "toml",
+    ".properties": "properties",
+    ".gradle": "gradle",
+    ".md": "markdown",
+    ".sh": "shell",
+    ".bat": "batch",
+    ".ps1": "powershell",
 }
 
 # Files matched by exact name regardless of extension.
 NAMED_FILES = {
-    "pom.xml": "maven", "build.gradle": "gradle", "build.gradle.kts": "gradle",
-    "Dockerfile": "docker", "Makefile": "make", "requirements.txt": "pip",
+    "pom.xml": "maven",
+    "build.gradle": "gradle",
+    "build.gradle.kts": "gradle",
+    "Dockerfile": "docker",
+    "Makefile": "make",
+    "requirements.txt": "pip",
 }
 
 # Directories never worth walking into.
 SKIP_DIRS = {
-    ".git", ".svn", ".hg", "node_modules", "target", "build", "dist", "out",
-    ".idea", ".vscode", "__pycache__", ".gradle", ".mvn", "bin", "obj",
-    "venv", ".venv", "env", "vendor", "coverage", ".pytest_cache",
+    ".git",
+    ".svn",
+    ".hg",
+    "node_modules",
+    "target",
+    "build",
+    "dist",
+    "out",
+    ".idea",
+    ".vscode",
+    "__pycache__",
+    ".gradle",
+    ".mvn",
+    "bin",
+    "obj",
+    "venv",
+    ".venv",
+    "env",
+    "vendor",
+    "coverage",
+    ".pytest_cache",
 }
 
 SKIP_FILES = {".DS_Store", "Thumbs.db", "vssver.scc"}
@@ -47,9 +101,27 @@ def classify_line(content: str, ext: str) -> str:
     if not stripped:
         return "blank"
 
-    if ext in (".java", ".kt", ".kts", ".scala", ".groovy", ".c", ".h", ".cpp",
-               ".cc", ".hpp", ".cs", ".go", ".rs", ".swift", ".js", ".jsx",
-               ".ts", ".tsx", ".php"):
+    if ext in (
+        ".java",
+        ".kt",
+        ".kts",
+        ".scala",
+        ".groovy",
+        ".c",
+        ".h",
+        ".cpp",
+        ".cc",
+        ".hpp",
+        ".cs",
+        ".go",
+        ".rs",
+        ".swift",
+        ".js",
+        ".jsx",
+        ".ts",
+        ".tsx",
+        ".php",
+    ):
         if stripped.startswith("//"):
             return "comment"
         if stripped.startswith(("/*", "*", "*/")):
