@@ -133,6 +133,32 @@ it. Verified: both audit files ignored, `.env.example` still tracked.
 | S-1 | session env free of `NEO4J_*`/`DB_*`/`GF_*`; `audit.env` in use | proved |
 | S-2 | 4 repos, counts unchanged | proved |
 
+**Live browser smoke test (Playwright MCP, not yet the P2 harness).** `graphforge
+ui --env audit.env --neo4j-uri bolt://127.0.0.1:7687 --port 8765`, driven in a
+real browser. Recorded because it is evidence from an actual run, not because it
+replaces P2.
+
+| Check | Evidence |
+|---|---|
+| Page loads | title `graphforge dashboard`, `Neo4j connected` |
+| Tiles reconcile with the CLI | 1,294 nodes / 1,803 relationships / 4 repositories / 1 database |
+| Label counts reconcile | all 20 chips equal the `graphforge verify` output (Method 751, Class 295, File 116, ...) |
+| Repositories table reconciles | matches `graphforge status` row for row: graphforge 97/19, e2e-inc 2/2, e2e-replace 1/2, e2e-twice 1/1 |
+| Graph canvas renders | 118 nodes / 120 relationships sampled, labelled, with a legend |
+| **Security — no credential on the page** | Neo4j and DB passwords both render `•••••• (set)`; harness rule satisfied |
+| **S-1 confirmed in the browser** | config panel shows `postgres / 127.0.0.1:55433 / shopdb` — `audit.env`, not the corporate `.env` |
+| Console | **1 error: `GET /favicon.ico` 404** |
+
+The favicon 404 is not a new defect: P10 already plans to serve `/favicon.ico`
+from `server.py` as a base64 PNG, because `tests/test_ui.py:84,88` ban the
+substrings `http`, `://` and `<link` anywhere in `dashboard.html`, which rules out
+both a `<link>` tag and a parseable SVG data URI. This run confirms the 404 the
+plan predicted.
+
+The dashboard currently on the branch is the `a81f06d` redesign — the P10
+*baseline*. It reads as one long scrolling document, which is what P10's app-shell
+grid, persistent rail and hash routing are meant to replace.
+
 ## Phase 1 — Packaging & pip
 
 Landed out of order, because it blocked G-1 for every later phase.
