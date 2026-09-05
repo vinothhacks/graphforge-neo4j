@@ -26,7 +26,7 @@ evidence rather than recollection.
 | # | Phase | Status |
 |---|---|---|
 | 0 | Baseline, safety, format debt | **complete** — `audit/p00-gate` |
-| 1 | Packaging & pip | partial — mcp 2.x fix landed early; build/ + wheel + venv matrix outstanding |
+| 1 | Packaging & pip | **complete** — `audit/p01-gate` |
 | 2 | Browser harness + UI security | not started |
 | 3 | UI-A shell, status, tiles, first-run, theme, keys | not started |
 | 4 | UI-B canvas, inspector, legend | not started |
@@ -214,5 +214,94 @@ survives unedited. Two regression tests added:
 | `mypy` | Success, 40 source files (was 1 error) |
 | MCP over real stdio | `initialize` handshake OK (protocol `2025-06-18`); `tools/list` returned **12 tools**; stderr clean; **no database required** |
 
-Still open for P1 proper: delete the stale `build/` tree, `python -m build`,
-`twine check --strict`, wheel package-data verification, 24 venvs × 12 helps.
+### P1 continued — packaging
+
+**Stale `build/` tree deleted.** 39 `.py` files, untracked and gitignored, with
+`build/lib/graphforge/mcp/server.py` dated Aug 30 against `src/`'s Sep 5 — six
+days stale and predating every change in this pass. `build_py` never removes
+stale files, so a build could have shipped the old module.
+
+**`MANIFEST.in` added.** setuptools put `tests/*.py` in the sdist and stopped
+there, so `tests/test_mssql_fixtures.py` shipped without the
+`tests/fixtures/mssql/information_schema.json` it reads — the sdist's own suite
+could not run. Verified before (`ABSENT`) and after
+(`graphforge_neo4j-0.3.0/tests/fixtures/mssql/information_schema.json`).
+
+**Package data now resolved with `importlib.resources`.** `neo4j_writer.load_schema`
+and the dashboard read used `Path(__file__)`, which assumes an unpacked install
+on a real filesystem. Chained `joinpath` because the multi-argument form is 3.11+
+and this package supports 3.10. Proved from a real `site-packages` wheel install,
+not the source tree: all three `.cypher` files and `dashboard.html` load.
+
+**`neo4j>=5.0.0` → `>=5.14,<7`**, with both ends probed against the live
+playground rather than asserted: 5.14.0 and 6.3.0 each give `verify` exit 0 and
+`Repository=4`. A blocking `driver-range` CI job now holds them there.
+
+**Import cost: 260 ms (plan) → 83.9 ms**, against a target of 120 ms.
+`importlib.metadata` and `tqdm` are both now completely off the import path
+(0 references each). Two changes were needed, because either alone does nothing:
+`__version__` became a PEP 562 module `__getattr__`, *and* `cli.py` stopped doing
+`from . import __version__` at module level, which would have triggered it at
+import time anyway. argparse's built-in `version` action needs the string up
+front, so it was replaced with an action that resolves on use. `tqdm` moved to a
+first-use import inside `neo4j_writer.tqdm` — verified to still return a real
+`tqdm.std.tqdm`, not the fallback.
+
+#### Two defects the phase found
+
+**1. A missing driver exited 0.** `graphforge db --url mysql://…` on a bare
+install reported `pushed 0 operations`, exited **0**, and logged the
+`pip install 'graphforge-neo4j[mysql]'` line at a level `-v` hides. Any script or
+CI step would have read that as success. Cause: `db/ingest.py` catches every
+exception per-database — correct for one bad credential in a ten-database run,
+wrong for a missing driver, which fails *every* database on that engine. Fixed
+with `MissingExtra(RuntimeError)` in `core/errors.py`, raised by all three
+drivers and deliberately re-raised at both catch sites. It subclasses
+`RuntimeError`, so the CLI's existing handler — whose comment already named
+"missing driver" as an expected user-facing failure — turns it into `error: …`
+and exit 2 unchanged.
+
+| extra | before | after |
+|---|---|---|
+| mysql | exit 0, hint hidden behind `-v` | exit 2, `pip install 'graphforge-neo4j[mysql]'`, no traceback |
+| postgres | exit 0, hint hidden | exit 2, `pip install 'graphforge-neo4j[postgres]'`, no traceback |
+| mssql | exit 0, hint hidden | exit 2, `pip install 'graphforge-neo4j[mssql]'`, no traceback |
+| mcp | bare `ModuleNotFoundError` | exit 2, `pip install -U 'graphforge-neo4j[mcp]'`, no traceback |
+
+**2. The friendly port-conflict message never fired on Windows.** `cli.py`
+checked `errno in (48, 98, 10013, 10048)`, but 10013/10048 are WSA codes that
+live on `.winerror` and can never appear in `errno`. Measured: Windows raises
+`PermissionError` with `errno=13` (the translated POSIX value) and
+`winerror=10013`. So a taken port printed a raw
+`[WinError 10013] An attempt was made to access a socket…` with no next-port
+hint — exactly the branch the plan noted CI has never run. Now checks both
+attributes; against a real occupied socket it gives
+`error: port 49687 is not available - try 'graphforge ui --port 49688'`.
+
+Both defects got regression tests, and both tests were **proved to have teeth**
+by reverting the fix and confirming the failure: `DID NOT RAISE MissingExtra`,
+and `PermissionError: [WinError 10013]` respectively.
+
+**Evidence:**
+
+| Check | Result |
+|---|---|
+| Offline suite | **292 passed**, 10 deselected (290 + 2 new regression tests) |
+| `ruff check` / `ruff format --check` / `mypy` | clean · 69 formatted · Success, 40 files |
+| `python -m build` + `twine check --strict` | PASSED, wheel and sdist |
+| Package data | verified by unzipping, and by loading from an installed wheel |
+| Matrix — py3.10/3.11/3.13 × 8 extras | **24/24**, each `--version` + `--help` + 12 subcommand helps |
+| Extras guards absent | 4/4 exit 2, actionable line, no traceback |
+| Port conflict | friendly message, exit 2, no traceback |
+| Driver range | 5.14.0 and 6.3.0 both `verify` exit 0, `Repository=4` |
+| S-2 | 4 repos, counts unchanged |
+
+One caveat recorded honestly: on the first matrix run `py3.13-dev` failed to
+install mypy with a uv Windows trampoline error
+(`Failed to update Windows PE resources … os error -2147024786`). It passed
+cleanly on retry (`12/12`), so it was environmental, not a packaging defect.
+
+Note the matrix axis: the plan specifies Python version × extras. An earlier run
+in this session used install-source × extras on 3.12 only — that is also all
+green (wheel, sdist and editable × 8 extras) but it is **not** the specified
+matrix, and the table above is the specified one.
