@@ -735,6 +735,9 @@ def stage_publish(args) -> None:
         )
 
     gh = shutil.which("gh")
+    if gh and subprocess.run([gh, "auth", "status"], capture_output=True).returncode != 0:
+        log("gh is installed but not logged in (run: gh auth login -w) -- trying other routes")
+        gh = None
     token = os.environ.get("GITHUB_TOKEN")
     if gh:
         notes = Path(tempfile.mkstemp(suffix=".md")[1])
