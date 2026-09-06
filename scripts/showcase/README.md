@@ -2,6 +2,8 @@
 
 Produces `out/graphforge-showcase.mp4`: a narrated product tour of the live dashboard and
 the knowledge graph it serves, plus two reference images and a short animated intro clip.
+Finished copies are checked in under `docs/showcase/` so the root README can link them
+directly; `out/` itself stays gitignored.
 
 What you say and show lives in **`scenes.py`**. `render.py` is the machinery and should not
 need editing to change content.

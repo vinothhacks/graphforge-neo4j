@@ -56,15 +56,15 @@ A single Cypher traversal answers each of these. Doing the same with two separat
 A three-minute narrated tour of the graphforge dashboard: the knowledge graph itself, its
 labels and relationship types, the read-only Cypher console, and every ingested source.
 
-[![graphforge](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/linkedin-post.png)](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/graphforge-showcase.mp4)
+[![graphforge](docs/showcase/linkedin-post.png)](docs/showcase/graphforge-showcase.mp4)
 
-**[▶ Watch graphforge-showcase.mp4](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/graphforge-showcase.mp4)** ·
-[release page](https://github.com/vinothhacks/graphforge-neo4j/releases/tag/showcase-v1)
+**[▶ Watch graphforge-showcase.mp4](docs/showcase/graphforge-showcase.mp4)** (14 MB, 2 min 44 s) ·
+[banner](docs/showcase/github-social.png)
 
 The video is generated, not hand-edited. [`scripts/showcase/`](scripts/showcase/README.md)
 records the browser with Playwright, narrates it with edge-tts, and keeps audio and video aligned
 by holding each page on screen for exactly as long as its narration runs.
-`python scripts/showcase/render.py` rebuilds it.
+`python scripts/showcase/render.py` rebuilds it; the finished files are copied to `docs/showcase/`.
 
 ---
 
