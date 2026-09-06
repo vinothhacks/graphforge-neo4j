@@ -18,6 +18,7 @@ By default the git and database subgraphs live side by side but stay separate. O
 ## Contents
 
 - [Why a graph](#why-a-graph)
+- [Showcase video](#showcase-video)
 - [Install](#install)
 - [Connect](docs/CONNECT.md)
 - [Quickstart](#quickstart)
@@ -47,6 +48,23 @@ Relational schemas and Git histories are both graphs wearing a disguise. Modelli
 - *Which classes implement a given interface across hundreds of modules?*
 
 A single Cypher traversal answers each of these. Doing the same with two separate tools means fetching both sides and stitching them together by hand.
+
+---
+
+## Showcase video
+
+A five-minute narrated walkthrough of this repository and the live dashboard: how the hardening
+pass was done, the logic behind each page, and the tech stack.
+
+[![graphforge](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/linkedin-post.png)](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/graphforge-showcase.mp4)
+
+**[▶ Watch graphforge-showcase.mp4](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/graphforge-showcase.mp4)** ·
+[release page](https://github.com/vinothhacks/graphforge-neo4j/releases/tag/showcase-v1)
+
+The video is generated, not hand-edited. [`scripts/showcase/`](scripts/showcase/README.md)
+records the browser with Playwright, narrates it with edge-tts, and keeps audio and video aligned
+by holding each page on screen for exactly as long as its narration runs.
+`python scripts/showcase/render.py` rebuilds it.
 
 ---
 

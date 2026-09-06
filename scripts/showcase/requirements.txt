@@ -1,0 +1,7 @@
+# Showcase video generator. Install into the same interpreter that has graphforge:
+#   python -m pip install -r scripts/showcase/requirements.txt
+#   python -m playwright install chromium
+#
+# ffmpeg and ffprobe must be on PATH (https://ffmpeg.org); they are not pip packages.
+edge-tts>=7
+playwright>=1.40

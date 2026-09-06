@@ -9,6 +9,8 @@
 audit.env*
 # Playwright MCP scratch output: snapshots, console logs, screenshots.
 .playwright-mcp/
+# Showcase video renders: audio, frames, recordings, generated images, the mp4.
+scripts/showcase/out/
 config/repositories.json
 config/databases.json
 config/connection.json
