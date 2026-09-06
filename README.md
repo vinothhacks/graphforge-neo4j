@@ -53,8 +53,8 @@ A single Cypher traversal answers each of these. Doing the same with two separat
 
 ## Showcase video
 
-A five-minute narrated walkthrough of this repository and the live dashboard: how the hardening
-pass was done, the logic behind each page, and the tech stack.
+A three-minute narrated tour of the graphforge dashboard: the knowledge graph itself, its
+labels and relationship types, the read-only Cypher console, and every ingested source.
 
 [![graphforge](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/linkedin-post.png)](https://github.com/vinothhacks/graphforge-neo4j/releases/download/showcase-v1/graphforge-showcase.mp4)
 

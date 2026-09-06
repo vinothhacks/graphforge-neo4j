@@ -1,7 +1,7 @@
 # Showcase video generator
 
-Produces `out/graphforge-showcase.mp4`: a narrated walkthrough of the GitHub repository and
-the live dashboard, plus two reference images and a short animated intro clip.
+Produces `out/graphforge-showcase.mp4`: a narrated product tour of the live dashboard and
+the knowledge graph it serves, plus two reference images and a short animated intro clip.
 
 What you say and show lives in **`scenes.py`**. `render.py` is the machinery and should not
 need editing to change content.

@@ -306,6 +306,14 @@ def _perform(page, actions: list[dict]) -> None:
                     page.mouse.move(cx + dx * k / 12, cy + dy * k / 12)
                     page.wait_for_timeout(30)
                 page.mouse.up()
+        elif "zoom" in a:
+            sel, dy = a["zoom"]
+            box = page.locator(sel).first.bounding_box()
+            if box:
+                page.mouse.move(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2)
+                for _ in range(6):
+                    page.mouse.wheel(0, dy / 6)
+                    page.wait_for_timeout(60)
         else:
             die(f"unknown action {a!r}")
 
