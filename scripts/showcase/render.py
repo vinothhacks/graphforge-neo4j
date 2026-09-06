@@ -491,8 +491,12 @@ def stage_clip(args) -> None:
                 "-i",
                 "anullsrc=r=48000:cl=stereo",
                 "-filter_complex",
-                "[0:v]scale=3840:2160:force_original_aspect_ratio=increase,crop=3840:2160,"
-                "zoompan=z='min(zoom+0.0012,1.30)':d=120:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
+                # Letterbox on a dark ground, never crop: the banner carries its title at
+                # the right edge and `increase`+crop cut the last letter off. The zoom is
+                # gentle for the same reason -- a 1.30x push-in would crop 23% of the frame.
+                "[0:v]scale=3840:2160:force_original_aspect_ratio=decrease,"
+                "pad=3840:2160:(ow-iw)/2:(oh-ih)/2:color=0x101218,"
+                "zoompan=z='min(zoom+0.0004,1.08)':d=120:x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)'"
                 ":s=1920x1080:fps=30,format=yuv420p[v]",
                 "-map",
                 "[v]",
@@ -787,6 +791,25 @@ def stage_publish(args) -> None:
 
 
 # ------------------------------------------------------------------------------ main
+LOCAL_ENV = HERE / "local.env"  # gitignored by the repo's *.env rule
+
+
+def _load_local_env() -> bool:
+    """Pick up OPENROUTER_API_KEY from local.env when the shell did not provide it.
+
+    The environment always wins. Only that one key is read, its value is never echoed,
+    and the file is meant to be deleted once the images exist -- it is the sole sanctioned
+    place for the key on disk, and only because a key on a command line is worse.
+    """
+    if os.environ.get("OPENROUTER_API_KEY") or not LOCAL_ENV.exists():
+        return False
+    for line in LOCAL_ENV.read_text(encoding="utf-8").splitlines():
+        if line.strip().startswith("OPENROUTER_API_KEY="):
+            os.environ["OPENROUTER_API_KEY"] = line.split("=", 1)[1].strip().strip("'\"")
+            return True
+    return False
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
@@ -801,6 +824,8 @@ def main() -> None:
     )
     ap.add_argument("--dry-run", action="store_true", help="print the plan and change nothing")
     args = ap.parse_args()
+    if _load_local_env():
+        log(f"OPENROUTER_API_KEY loaded from {LOCAL_ENV.name} (gitignored; delete it when done)")
 
     stages = args.only or [s for s in STAGES if s != "publish" or args.publish]
     stages = [s for s in stages if s not in args.skip]
