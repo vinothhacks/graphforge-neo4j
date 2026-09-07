@@ -3,6 +3,10 @@
 .env
 *.env
 !.env.example
+# Showcase video renders: audio, frames, recordings, generated images, the mp4.
+scripts/showcase/out/
+# Playwright MCP scratch output.
+.playwright-mcp/
 config/repositories.json
 config/databases.json
 config/connection.json

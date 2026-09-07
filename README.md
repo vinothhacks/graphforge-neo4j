@@ -18,6 +18,7 @@ By default the git and database subgraphs live side by side but stay separate. O
 ## Contents
 
 - [Why a graph](#why-a-graph)
+- [Showcase video](#showcase-video)
 - [Install](#install)
 - [Connect](docs/CONNECT.md)
 - [Quickstart](#quickstart)
@@ -47,6 +48,23 @@ Relational schemas and Git histories are both graphs wearing a disguise. Modelli
 - *Which classes implement a given interface across hundreds of modules?*
 
 A single Cypher traversal answers each of these. Doing the same with two separate tools means fetching both sides and stitching them together by hand.
+
+---
+
+## Showcase video
+
+A three-minute narrated tour of the graphforge dashboard: the knowledge graph itself, its
+labels and relationship types, the read-only Cypher console, and every ingested source.
+
+[![graphforge](docs/showcase/linkedin-post.png)](docs/showcase/graphforge-showcase.mp4)
+
+**[▶ Watch graphforge-showcase.mp4](docs/showcase/graphforge-showcase.mp4)** (14 MB, 2 min 44 s) ·
+[banner](docs/showcase/github-social.png)
+
+The video is generated, not hand-edited. [`scripts/showcase/`](scripts/showcase/README.md)
+records the browser with Playwright, narrates it with edge-tts, and keeps audio and video
+aligned by holding each page on screen for exactly as long as its narration runs.
+`python scripts/showcase/render.py` rebuilds it.
 
 ---
 
