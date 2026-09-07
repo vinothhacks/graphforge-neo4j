@@ -13,8 +13,12 @@ services:
     environment:
       # format is user/password
       NEO4J_AUTH: neo4j/please-change-me
+      # APOC is installed but deliberately NOT unrestricted. graphforge needs no
+      # APOC at all — docker-compose.ci.yml proves it by running the link passes
+      # without the plugin — and "apoc.*" unrestricted would hand anything that
+      # reaches this server apoc.load.jdbc / apoc.load.json, i.e. outbound network
+      # and filesystem access. Add specific procedures here if you need them.
       NEO4J_PLUGINS: '["apoc"]'
-      NEO4J_dbms_security_procedures_unrestricted: "apoc.*"
       NEO4J_server_memory_heap_max__size: 2G
     volumes:
       - neo4j_data:/data

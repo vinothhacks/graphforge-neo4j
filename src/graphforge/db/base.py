@@ -8,6 +8,7 @@ foreign keys) comes from ANSI INFORMATION_SCHEMA in this base class.
 Extractors return plain normalized dicts so the graph mapping in
 ``db.ingest`` can be unit-tested with a fake extractor and no live database.
 """
+
 from __future__ import annotations
 
 import logging
@@ -39,12 +40,19 @@ class DatabaseMeta:
 
 class SchemaExtractor:
     engine: str = "generic"
-    placeholder: str = "%s"          # DB-API paramstyle marker
+    placeholder: str = "%s"  # DB-API paramstyle marker
     default_schema_is_database: bool = True  # MySQL-style: one schema == the database
 
-    def __init__(self, host: str, port: int, user: str, password: str,
-                 driver: str | None = None, schemas: list[str] | None = None,
-                 sample_rows: int = 0):
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+        driver: str | None = None,
+        schemas: list[str] | None = None,
+        sample_rows: int = 0,
+    ):
         self.host = host
         self.port = port
         self.user = user
@@ -174,8 +182,10 @@ class SchemaExtractor:
     def map_foreign_key(self, row: dict) -> dict:
         return {
             "constraintName": row.get("constraint_name", ""),
-            "fromTable": row["from_table"], "fromColumn": row["from_column"],
-            "toTable": row["to_table"], "toColumn": row["to_column"],
+            "fromTable": row["from_table"],
+            "fromColumn": row["from_column"],
+            "toTable": row["to_table"],
+            "toColumn": row["to_column"],
         }
 
     # -- driver loop -------------------------------------------------------
@@ -251,16 +261,21 @@ class SchemaExtractor:
                 continue
             table["approxRows"] = rows
             if rows > self.sample_rows:
-                log.debug("%s.%s has %d rows (> %d); skipping cardinality probes",
-                          schema, name, rows, self.sample_rows)
+                log.debug(
+                    "%s.%s has %d rows (> %d); skipping cardinality probes",
+                    schema,
+                    name,
+                    rows,
+                    self.sample_rows,
+                )
                 continue
             for col in columns_by_table.get(name, []):
                 cname = col.get("name", "")
                 if not _safe_ident(cname):
                     continue
                 distinct = self._scalar(
-                    cursor,
-                    f"SELECT COUNT(DISTINCT {self.quote_ident(cname)}) FROM {target}")
+                    cursor, f"SELECT COUNT(DISTINCT {self.quote_ident(cname)}) FROM {target}"
+                )
                 if distinct is not None:
                     col["approxCardinality"] = distinct
 
@@ -271,17 +286,28 @@ class SchemaExtractor:
             cursor = conn.cursor()
             for schema in self.schemas(database, cursor):
                 sm = SchemaMeta(name=schema)
-                sm.tables = [{"name": r["name"]} for r in self._rows(cursor, self.tables_sql(schema))]
-                sm.columns = [self.map_column(r) for r in self._rows(cursor, self.columns_sql(schema))]
+                sm.tables = [
+                    {"name": r["name"]} for r in self._rows(cursor, self.tables_sql(schema))
+                ]
+                sm.columns = [
+                    self.map_column(r) for r in self._rows(cursor, self.columns_sql(schema))
+                ]
                 sm.views = [self.map_view(r) for r in self._rows(cursor, self.views_sql(schema))]
-                sm.procedures = [self.map_procedure(r) for r in self._rows(cursor, self.procedures_sql(schema))]
+                sm.procedures = [
+                    self.map_procedure(r) for r in self._rows(cursor, self.procedures_sql(schema))
+                ]
                 self._attach_parameters(cursor, schema, sm.procedures)
                 try:
-                    sm.indexes = [self.map_index(r) for r in self._rows(cursor, self.indexes_sql(schema))]
+                    sm.indexes = [
+                        self.map_index(r) for r in self._rows(cursor, self.indexes_sql(schema))
+                    ]
                 except Exception as exc:  # noqa: BLE001  # indexes are best-effort; keep the rest of the schema
                     log.warning("index extraction failed for %s.%s: %s", database, schema, exc)
                 try:
-                    sm.foreign_keys = [self.map_foreign_key(r) for r in self._rows(cursor, self.foreign_keys_sql(schema))]
+                    sm.foreign_keys = [
+                        self.map_foreign_key(r)
+                        for r in self._rows(cursor, self.foreign_keys_sql(schema))
+                    ]
                 except Exception as exc:  # noqa: BLE001  # FKs are best-effort; keep the rest of the schema
                     log.warning("FK extraction failed for %s.%s: %s", database, schema, exc)
                 self.sample_statistics(cursor, schema, sm)

@@ -15,6 +15,7 @@ Bucketing rules:
     ``type X interface`` -> ``interfaces``
     ``type X Underlying``-> ``classes`` (with ``type: "type"``)
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -29,27 +30,55 @@ _TYPE_OPEN = re.compile(r"^type\s*\(\s*$")
 _CONST_OPEN = re.compile(r"^const\s*\(")
 _IOTA = re.compile(r"^\w+(?:\s*,\s*\w+)*\s+(?P<type>\w+)\s*=\s*iota\b")
 _TYPE_DECL = re.compile(
-    r"^(?:type\s+)?(?P<name>\w+)(?:\[[^\]]*\])?\s+(?P<kind>struct|interface)\s*\{")
+    r"^(?:type\s+)?(?P<name>\w+)(?:\[[^\]]*\])?\s+(?P<kind>struct|interface)\s*\{"
+)
 _TYPE_ALIAS = re.compile(
-    r"^(?:type\s+)?(?P<name>\w+)(?:\[[^\]]*\])?\s*=?\s+(?P<under>[\w\[\]*.]+)\s*$")
+    r"^(?:type\s+)?(?P<name>\w+)(?:\[[^\]]*\])?\s*=?\s+(?P<under>[\w\[\]*.]+)\s*$"
+)
 _METHOD = re.compile(
     r"^func\s*\(\s*(?:(?P<recv>\w+)\s+)?(?P<rtype>[\[\]*\w.]+)\s*\)\s*"
-    r"(?P<name>\w+)\s*(?:\[[^\]]*\])?\s*\(")
+    r"(?P<name>\w+)\s*(?:\[[^\]]*\])?\s*\("
+)
 _FUNC = re.compile(r"^func\s+(?P<name>\w+)\s*(?:\[[^\]]*\])?\s*\(")
 _EMBEDDED = re.compile(r"^(?P<ptr>\*)?(?P<name>(?:\w+\.)?[A-Z]\w*)\s*(?:`[^`]*`)?\s*$")
 _IFACE_METHOD = re.compile(r"^(?P<name>\w+)\s*\((?P<args>[^)]*)\)\s*(?P<ret>.*)$")
 _IFACE_EMBED = re.compile(r"^(?P<name>(?:\w+\.)?[A-Z]\w*)\s*$")
 
-_KEYWORDS = {"if", "for", "switch", "select", "return", "go", "defer", "range",
-             "case", "default", "else", "func", "var", "const", "type", "struct",
-             "interface", "map", "chan", "package", "import"}
+_KEYWORDS = {
+    "if",
+    "for",
+    "switch",
+    "select",
+    "return",
+    "go",
+    "defer",
+    "range",
+    "case",
+    "default",
+    "else",
+    "func",
+    "var",
+    "const",
+    "type",
+    "struct",
+    "interface",
+    "map",
+    "chan",
+    "package",
+    "import",
+}
 
 
 def extract(lines: list[str]) -> dict[str, Any]:
     """Return the structural summary of a Go source file. Never raises."""
     result: dict[str, Any] = {
-        "package": "", "imports": [], "classes": [], "interfaces": [],
-        "enums": [], "methods": [], "annotations": [],
+        "package": "",
+        "imports": [],
+        "classes": [],
+        "interfaces": [],
+        "enums": [],
+        "methods": [],
+        "annotations": [],
     }
     # a malformed file must never abort a repo scan
     with contextlib.suppress(Exception):
@@ -63,7 +92,7 @@ def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
     in_imports = False
     in_types = False
     in_consts = False
-    body: dict[str, Any] | None = None    # open struct / interface declaration
+    body: dict[str, Any] | None = None  # open struct / interface declaration
     seen_enums: set[str] = set()
 
     for i, raw in enumerate(lines, 1):
@@ -127,7 +156,11 @@ def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
                 body = decl
                 continue
             am = _TYPE_ALIAS.match(line)
-            if am is not None and (in_types or line.startswith("type ")) and am.group("name") not in _KEYWORDS:
+            if (
+                am is not None
+                and (in_types or line.startswith("type "))
+                and am.group("name") not in _KEYWORDS
+            ):
                 info = _type_info(am.group("name"), "type", i)
                 info["extends"] = am.group("under")
                 result["classes"].append(info)
@@ -135,15 +168,21 @@ def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
 
         mm = _METHOD.match(line)
         if mm:
-            result["methods"].append(_method(
-                mm.group("name"), i, line, _base_type(mm.group("rtype")),
-                receiver=(mm.group("recv") or ""), args_at=mm.end() - 1))
+            result["methods"].append(
+                _method(
+                    mm.group("name"),
+                    i,
+                    line,
+                    _base_type(mm.group("rtype")),
+                    receiver=(mm.group("recv") or ""),
+                    args_at=mm.end() - 1,
+                )
+            )
             continue
 
         fm = _FUNC.match(line)
         if fm and fm.group("name") not in _KEYWORDS:
-            result["methods"].append(_method(fm.group("name"), i, line, "",
-                                             args_at=fm.end() - 1))
+            result["methods"].append(_method(fm.group("name"), i, line, "", args_at=fm.end() - 1))
             continue
 
 
@@ -159,7 +198,7 @@ def _strip(raw: str, in_block_comment: bool) -> tuple[str, bool]:
                 return "".join(out), True
             i, in_block_comment = j + 2, False
             continue
-        two = raw[i:i + 2]
+        two = raw[i : i + 2]
         if two == "//":
             break
         if two == "/*":
@@ -176,7 +215,7 @@ def _strip(raw: str, in_block_comment: bool) -> tuple[str, bool]:
                 if raw[j] == ch:
                     break
                 j += 1
-            out.append(raw[i:j + 1])
+            out.append(raw[i : j + 1])
             i = j + 1
             continue
         out.append(ch)
@@ -194,25 +233,40 @@ def _base_type(text: str) -> str:
 
 
 def _import(match: re.Match, line: int) -> dict[str, Any]:
-    return {"fqn": match.group("path"), "line": line,
-            "alias": (match.group("alias") or "").strip(), "kind": "import"}
+    return {
+        "fqn": match.group("path"),
+        "line": line,
+        "alias": (match.group("alias") or "").strip(),
+        "kind": "import",
+    }
 
 
 def _type_info(name: str, kind: str, line: int) -> dict[str, Any]:
     return {
-        "name": name, "type": kind, "line": line,
+        "name": name,
+        "type": kind,
+        "line": line,
         "visibility": _visibility(name),
-        "isAbstract": kind == "interface", "isFinal": False,
-        "annotations": [], "stereotype": "", "mappedTable": "",
+        "isAbstract": kind == "interface",
+        "isFinal": False,
+        "annotations": [],
+        "stereotype": "",
+        "mappedTable": "",
     }
 
 
-def _method(name: str, line: int, code: str, owner: str, receiver: str = "",
-            args_at: int = 0) -> dict[str, Any]:
+def _method(
+    name: str, line: int, code: str, owner: str, receiver: str = "", args_at: int = 0
+) -> dict[str, Any]:
     return {
-        "name": name, "line": line, "returnType": _return_type(code, args_at),
-        "visibility": _visibility(name), "owner": owner, "receiver": receiver,
-        "isAsync": False, "annotations": [],
+        "name": name,
+        "line": line,
+        "returnType": _return_type(code, args_at),
+        "visibility": _visibility(name),
+        "owner": owner,
+        "receiver": receiver,
+        "isAsync": False,
+        "annotations": [],
     }
 
 
@@ -232,7 +286,7 @@ def _return_type(code: str, args_at: int = 0) -> str:
         elif code[idx] == ")":
             depth -= 1
             if depth == 0:
-                return code[idx + 1:].split("{")[0].strip()
+                return code[idx + 1 :].split("{")[0].strip()
     return ""
 
 
@@ -255,7 +309,7 @@ def _type_declaration(result: dict[str, Any], line: str, i: int) -> dict[str, An
     info = _type_info(m.group("name"), kind, i)
     bucket = "interfaces" if kind == "interface" else "classes"
     result[bucket].append(info)
-    if line.rstrip().endswith("}"):       # single-line `type X struct{}`
+    if line.rstrip().endswith("}"):  # single-line `type X struct{}`
         return None
     return {"kind": kind, "info": info}
 
@@ -270,13 +324,18 @@ def _body_member(result: dict[str, Any], body: dict[str, Any], line: str, i: int
             return
         mm = _IFACE_METHOD.match(line)
         if mm and mm.group("name") not in _KEYWORDS:
-            result["methods"].append({
-                "name": mm.group("name"), "line": i,
-                "returnType": (mm.group("ret") or "").strip(),
-                "visibility": _visibility(mm.group("name")),
-                "owner": info["name"], "receiver": "", "isAsync": False,
-                "annotations": [],
-            })
+            result["methods"].append(
+                {
+                    "name": mm.group("name"),
+                    "line": i,
+                    "returnType": (mm.group("ret") or "").strip(),
+                    "visibility": _visibility(mm.group("name")),
+                    "owner": info["name"],
+                    "receiver": "",
+                    "isAsync": False,
+                    "annotations": [],
+                }
+            )
         return
     em = _EMBEDDED.match(line)
     if em and em.group("name") not in _KEYWORDS:

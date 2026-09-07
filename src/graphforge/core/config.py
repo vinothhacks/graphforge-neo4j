@@ -3,6 +3,7 @@
 Values are read from the process environment (optionally seeded from a local
 `.env` file via python-dotenv). CLI flags may override individual fields.
 """
+
 from __future__ import annotations
 
 import os
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field
 try:
     from dotenv import load_dotenv
 except ImportError:  # pragma: no cover - dotenv is a core dep but keep import soft
+
     def load_dotenv(*_args, **_kwargs):  # type: ignore
         return False
 
@@ -52,6 +54,23 @@ class Neo4jSettings:
             database=os.getenv("NEO4J_DATABASE", cls.database),
             batch_size=_int(os.getenv("GF_BATCH_SIZE"), cls.batch_size),
             include_lines=_bool(os.getenv("GF_INCLUDE_LINES"), cls.include_lines),
+        )
+
+    def check_connectable(self) -> None:
+        """Fail with advice *before* connecting, rather than as a driver traceback.
+
+        Called only from the two places that actually open a driver, so
+        ``--emit`` and ``--dry-run`` still need no configuration at all.
+        """
+        if self.password:
+            return
+        if _bool(os.getenv("GF_ALLOW_EMPTY_PASSWORD"), False):
+            return  # a server started with NEO4J_AUTH=none
+        raise ValueError(
+            "NEO4J_PASSWORD is not set.\n"
+            "  copy .env.example to .env and fill it in, or pass --neo4j-password.\n"
+            "  if your server runs with auth disabled, set GF_ALLOW_EMPTY_PASSWORD=true.\n"
+            "  `graphforge doctor` will tell you which of these applies."
         )
 
 

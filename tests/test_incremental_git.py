@@ -1,4 +1,5 @@
 """Incremental git ingest: --since-commit, :Repository.lastCommit, no duplicates."""
+
 import re
 import shutil
 import subprocess
@@ -21,28 +22,38 @@ def _git(cwd, *args):
 
 
 def _sha(cwd):
-    out = subprocess.run(["git", "rev-parse", "HEAD"], cwd=str(cwd),
-                         check=True, capture_output=True, text=True)
+    out = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(cwd), check=True, capture_output=True, text=True
+    )
     return out.stdout.strip()
 
 
 def _ingest(repo_dir, out_path, clone_dir, **kw):
     with Neo4jWriter(settings=None, emit_path=str(out_path)) as w:
         GitIngestor(w, GitSettings(repo_dir=str(clone_dir))).ingest_repo(
-            {"path": str(repo_dir), "name": "demo"}, **kw)
+            {"path": str(repo_dir), "name": "demo"}, **kw
+        )
     return out_path.read_text()
 
 
 def _nodes(text, label, only_full=False):
     """Node ids MERGEd for a label; `only_full` keeps just the ones carrying props."""
-    return [m.group("id") for m in _MERGE.finditer(text)
-            if m.group("label") == label and (m.group("set") or not only_full)]
+    return [
+        m.group("id")
+        for m in _MERGE.finditer(text)
+        if m.group("label") == label and (m.group("set") or not only_full)
+    ]
 
 
 def _scanned_files(text):
     """File ids written by the structure pass (history also merges File stubs)."""
-    return sorted({stmt.split("'")[1] for stmt in text.split("MERGE (n:File {id: ")[1:]
-                   if "n.totalLines" in stmt.split(";")[0]})
+    return sorted(
+        {
+            stmt.split("'")[1]
+            for stmt in text.split("MERGE (n:File {id: ")[1:]
+            if "n.totalLines" in stmt.split(";")[0]
+        }
+    )
 
 
 @pytest.fixture
@@ -67,7 +78,9 @@ def test_since_commit_round_trip(repo, tmp_path):
     assert f"r.lastCommit = '{base_sha}'" in first
     assert "demo/app/models.py" in first and "demo/app/util.py" in first
 
-    (repo / "app" / "orders.py").write_text("class Invoice:\n    def pay(self):\n        return 2\n")
+    (repo / "app" / "orders.py").write_text(
+        "class Invoice:\n    def pay(self):\n        return 2\n"
+    )
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "second commit")
     new_sha = _sha(repo)
@@ -112,8 +125,7 @@ def test_re_ingest_creates_no_duplicate_ids(repo, tmp_path):
 
 
 def test_unknown_sha_falls_back_to_a_full_ingest(repo, tmp_path):
-    text = _ingest(repo, tmp_path / "o.cypher", tmp_path / "c",
-                   since_commit="0" * 40)
+    text = _ingest(repo, tmp_path / "o.cypher", tmp_path / "c", since_commit="0" * 40)
     assert "first commit" in text
     assert "demo/app/util.py" in text
 
@@ -130,10 +142,9 @@ def test_replace_wins_over_since_commit(repo, tmp_path):
     (repo / "app" / "orders.py").write_text("class Invoice:\n    pass\n")
     _git(repo, "add", "-A")
     _git(repo, "commit", "-qm", "second commit")
-    text = _ingest(repo, tmp_path / "o.cypher", tmp_path / "c",
-                   since_commit=base_sha, replace=True)
+    text = _ingest(repo, tmp_path / "o.cypher", tmp_path / "c", since_commit=base_sha, replace=True)
     assert "DETACH DELETE" in text
-    assert "first commit" in text     # a wipe must be followed by a full reload
+    assert "first commit" in text  # a wipe must be followed by a full reload
 
 
 def test_history_helpers(repo):
@@ -157,6 +168,6 @@ def test_history_helpers(repo):
 
 def test_cli_exposes_since_commit():
     args = build_parser().parse_args(["git", "/tmp/x"])
-    assert args.since_commit == ""                     # off by default
+    assert args.since_commit == ""  # off by default
     args = build_parser().parse_args(["git", "/tmp/x", "--since-commit", "auto"])
     assert args.since_commit == "auto"

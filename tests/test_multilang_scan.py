@@ -1,4 +1,5 @@
 """New-language parsers wired end to end: scan -> :Class / :Method in the graph."""
+
 from graphforge.core.config import GitSettings
 from graphforge.core.neo4j_writer import Neo4jWriter
 from graphforge.git import scan as scan_mod
@@ -26,9 +27,7 @@ FILES = {
         "  render(): void {}\n"
         "}\n"
     ),
-    "web/legacy.jsx": (
-        "export function Panel() { return null; }\n"
-    ),
+    "web/legacy.jsx": ("export function Panel() { return null; }\n"),
     "svc/store/store.go": (
         "package store\n"
         "\n"
@@ -47,11 +46,7 @@ FILES = {
         "func New() *Store { return nil }\n"
     ),
     "java/Widget.java": (
-        "package com.acme;\n"
-        "\n"
-        "public class Widget {\n"
-        "    public String name() { return null; }\n"
-        "}\n"
+        "package com.acme;\n\npublic class Widget {\n    public String name() { return null; }\n}\n"
     ),
 }
 
@@ -69,7 +64,8 @@ def _emit(tmp_path):
     out = tmp_path / "o.cypher"
     with Neo4jWriter(settings=None, emit_path=str(out)) as w:
         GitIngestor(w, GitSettings(repo_dir=str(tmp_path / "clones"))).ingest_repo(
-            {"path": str(root), "name": "demo"}, with_history=False)
+            {"path": str(root), "name": "demo"}, with_history=False
+        )
     return out.read_text()
 
 
@@ -84,20 +80,20 @@ def test_scan_populates_structure_and_namespace(tmp_path):
     py = files["app/models.py"]
     assert py.type == "python"
     assert py.structure["classes"][0]["name"] == "Order"
-    assert py.namespace == "app.models"          # dotted module path
-    assert py.package == ""                      # :Package nodes stay Java-only
+    assert py.namespace == "app.models"  # dotted module path
+    assert py.package == ""  # :Package nodes stay Java-only
 
     go = files["svc/store/store.go"]
-    assert go.namespace == "svc.store"           # the package directory
+    assert go.namespace == "svc.store"  # the package directory
     assert go.structure["package"] == "store"
 
     ts = files["web/Widget.ts"]
     assert ts.namespace == "web.Widget"
 
     java = files["java/Widget.java"]
-    assert java.namespace == "com.acme"          # unchanged: the declared package
+    assert java.namespace == "com.acme"  # unchanged: the declared package
     assert java.package == "com.acme"
-    assert java.java is java.structure           # back-compat alias still works
+    assert java.java is java.structure  # back-compat alias still works
     assert py.java is None
 
 
@@ -134,7 +130,7 @@ def test_typescript_and_jsx_produce_nodes(tmp_path):
     text = _emit(tmp_path)
     assert "MERGE (n:Class {id: 'demo/web.Widget.Widget'})" in text
     assert "n.stereotype = 'Component'" in text
-    assert "SET n:Component" in text          # stereotype promoted to a label
+    assert "SET n:Component" in text  # stereotype promoted to a label
     assert "MERGE (n:Method {id: 'demo/web.Widget.Widget#render'})" in text
     assert "MERGE (n:Method {id: 'demo/web/legacy.jsx#Panel'})" in text
 

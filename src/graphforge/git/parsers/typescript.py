@@ -14,6 +14,7 @@ Bucketing rules:
     ``interface X`` / ``type`` -> ``interfaces``
     ``enum X``                 -> ``enums``
 """
+
 from __future__ import annotations
 
 import contextlib
@@ -23,58 +24,102 @@ from typing import Any
 _MODS = r"(?:export\s+)?(?:default\s+)?(?:declare\s+)?"
 
 _IMPORT_FROM = re.compile(
-    r"^import\s+(?:type\s+)?(?P<what>[^'\"]*?)\s*from\s*['\"](?P<mod>[^'\"]+)['\"]")
+    r"^import\s+(?:type\s+)?(?P<what>[^'\"]*?)\s*from\s*['\"](?P<mod>[^'\"]+)['\"]"
+)
 _IMPORT_BARE = re.compile(r"^import\s*['\"](?P<mod>[^'\"]+)['\"]")
 _EXPORT_FROM = re.compile(
-    r"^export\s+(?:type\s+)?(?P<what>[^'\"]*?)\s*from\s*['\"](?P<mod>[^'\"]+)['\"]")
+    r"^export\s+(?:type\s+)?(?P<what>[^'\"]*?)\s*from\s*['\"](?P<mod>[^'\"]+)['\"]"
+)
 _REQUIRE = re.compile(
-    r"^(?:const|let|var)\s+(?P<what>[\w{}\s,:*]+?)\s*=\s*require\s*\(\s*['\"](?P<mod>[^'\"]+)['\"]")
+    r"^(?:const|let|var)\s+(?P<what>[\w{}\s,:*]+?)\s*=\s*require\s*\(\s*['\"](?P<mod>[^'\"]+)['\"]"
+)
 
 _CLASS = re.compile(
     _MODS + r"(?:abstract\s+)?class\s+(?P<name>\w+)\s*(?:<[^>]*>)?"
     r"(?:\s+extends\s+(?P<extends>[\w$.]+)\s*(?:<[^>]*>)?)?"
-    r"(?:\s+implements\s+(?P<impl>[^{]+?))?\s*\{")
+    r"(?:\s+implements\s+(?P<impl>[^{]+?))?\s*\{"
+)
 _INTERFACE = re.compile(
     _MODS + r"interface\s+(?P<name>\w+)\s*(?:<[^>]*>)?"
-    r"(?:\s+extends\s+(?P<extends>[^{]+?))?\s*\{")
+    r"(?:\s+extends\s+(?P<extends>[^{]+?))?\s*\{"
+)
 _ENUM = re.compile(_MODS + r"(?:const\s+)?enum\s+(?P<name>\w+)\s*\{")
 _TYPE_ALIAS = re.compile(_MODS + r"type\s+(?P<name>\w+)\s*(?:<[^>]*>)?\s*=")
-_FUNCTION = re.compile(
-    _MODS + r"(?:async\s+)?function\s*\*?\s*(?P<name>\w+)\s*(?:<[^>]*>)?\s*\(")
+_FUNCTION = re.compile(_MODS + r"(?:async\s+)?function\s*\*?\s*(?P<name>\w+)\s*(?:<[^>]*>)?\s*\(")
 _ARROW_CONST = re.compile(
-    _MODS + r"(?:const|let|var)\s+(?P<name>\w+)\s*(?::[^=]+)?=\s*(?P<rhs>.+)$")
+    _MODS + r"(?:const|let|var)\s+(?P<name>\w+)\s*(?::[^=]+)?=\s*(?P<rhs>.+)$"
+)
 _METHOD = re.compile(
     r"^(?P<mods>(?:public|private|protected|readonly|static|abstract|override|async|get|set|\*|\s)*)"
     r"(?P<name>[A-Za-z_$][\w$]*)\s*(?:<[^>]*>)?\s*\((?P<args>[^;]*?)\)\s*"
-    r"(?::\s*(?P<ret>[^{;]+?))?\s*(?P<tail>[{;])")
+    r"(?::\s*(?P<ret>[^{;]+?))?\s*(?P<tail>[{;])"
+)
 _DECORATOR = re.compile(r"^@(?P<name>[\w$.]+)\s*(?:\((?P<args>.*)\))?\s*$")
-_EXPORT_NAMES = re.compile(r"^export\s+(?:default\s+)?(?:declare\s+)?"
-                           r"(?:abstract\s+)?(?:async\s+)?"
-                           r"(?:class|interface|enum|type|function|const|let|var)\s+(?P<name>\w+)")
+_EXPORT_NAMES = re.compile(
+    r"^export\s+(?:default\s+)?(?:declare\s+)?"
+    r"(?:abstract\s+)?(?:async\s+)?"
+    r"(?:class|interface|enum|type|function|const|let|var)\s+(?P<name>\w+)"
+)
 _EXPORT_LIST = re.compile(r"^export\s*\{(?P<names>[^}]*)\}")
 _NAME_OPTION = re.compile(r"""name\s*:\s*['"]([^'"]+)['"]""")
 _FIRST_STRING = re.compile(r"""['"]([^'"]+)['"]""")
 
-_KEYWORDS = {"if", "for", "while", "switch", "catch", "return", "function", "do",
-             "else", "try", "new", "typeof", "await", "yield",
-             "class", "interface", "enum", "import", "export", "throw", "delete",
-             "case", "with", "of", "in", "super"}
+_KEYWORDS = {
+    "if",
+    "for",
+    "while",
+    "switch",
+    "catch",
+    "return",
+    "function",
+    "do",
+    "else",
+    "try",
+    "new",
+    "typeof",
+    "await",
+    "yield",
+    "class",
+    "interface",
+    "enum",
+    "import",
+    "export",
+    "throw",
+    "delete",
+    "case",
+    "with",
+    "of",
+    "in",
+    "super",
+}
 
 # decorator simple-name -> semantic stereotype (must be a valid Cypher label)
 _STEREOTYPES = {
-    "Component": "Component", "Directive": "Component", "Pipe": "Component",
-    "Injectable": "Service", "Service": "Service",
-    "NgModule": "NgModule", "Module": "NgModule",
-    "Entity": "Entity", "ViewEntity": "Entity",
-    "Controller": "Controller", "RestController": "Controller",
+    "Component": "Component",
+    "Directive": "Component",
+    "Pipe": "Component",
+    "Injectable": "Service",
+    "Service": "Service",
+    "NgModule": "NgModule",
+    "Module": "NgModule",
+    "Entity": "Entity",
+    "ViewEntity": "Entity",
+    "Controller": "Controller",
+    "RestController": "Controller",
 }
 
 
 def extract(lines: list[str]) -> dict[str, Any]:
     """Return the structural summary of a TS/JS source file. Never raises."""
     result: dict[str, Any] = {
-        "package": "", "imports": [], "classes": [], "interfaces": [],
-        "enums": [], "methods": [], "annotations": [], "exports": [],
+        "package": "",
+        "imports": [],
+        "classes": [],
+        "interfaces": [],
+        "enums": [],
+        "methods": [],
+        "annotations": [],
+        "exports": [],
     }
     # a malformed file must never abort a repo scan
     with contextlib.suppress(Exception):
@@ -85,10 +130,10 @@ def extract(lines: list[str]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
     in_block_comment = False
-    pending: list[dict[str, str]] = []   # decorators awaiting a declaration
-    stack: list[dict[str, Any]] = []     # open type bodies, by brace depth
+    pending: list[dict[str, str]] = []  # decorators awaiting a declaration
+    stack: list[dict[str, Any]] = []  # open type bodies, by brace depth
     depth = 0
-    dec_buf: list[str] = []              # a decorator whose args span lines
+    dec_buf: list[str] = []  # a decorator whose args span lines
     dec_line = 0
 
     for i, raw in enumerate(lines, 1):
@@ -117,14 +162,14 @@ def _extract_into(lines: list[str], result: dict[str, Any]) -> None:
             _record_decorator(result, joined, dec_line, owner, pending)
             continue
 
-        _handle_line(result, line, quoted, i, depth, owner, at_member_level,
-                     pending, stack)
-        pending = []   # a non-decorator line ends the decorator -> declaration bond
+        _handle_line(result, line, quoted, i, depth, owner, at_member_level, pending, stack)
+        pending = []  # a non-decorator line ends the decorator -> declaration bond
         depth += _depth_delta(code)
 
 
-def _record_decorator(result: dict[str, Any], joined: str, line: int, owner: str,
-                      pending: list[dict[str, str]]) -> None:
+def _record_decorator(
+    result: dict[str, Any], joined: str, line: int, owner: str, pending: list[dict[str, str]]
+) -> None:
     dm = _DECORATOR.match(joined)
     if not dm:
         return
@@ -133,9 +178,17 @@ def _record_decorator(result: dict[str, Any], joined: str, line: int, owner: str
     result["annotations"].append({"name": name, "line": line, "owner": owner})
 
 
-def _handle_line(result, line: str, quoted: str, i: int, depth: int, owner: str,
-                 at_member_level: bool, pending: list[dict[str, str]],
-                 stack: list[dict[str, Any]]) -> str:
+def _handle_line(
+    result,
+    line: str,
+    quoted: str,
+    i: int,
+    depth: int,
+    owner: str,
+    at_member_level: bool,
+    pending: list[dict[str, str]],
+    stack: list[dict[str, Any]],
+) -> str:
     if _record_imports(result, quoted, i):
         return "import"
 
@@ -189,8 +242,9 @@ def _handle_line(result, line: str, quoted: str, i: int, depth: int, owner: str,
     if at_member_level:
         mm = _METHOD.match(line)
         if mm and mm.group("name") not in _KEYWORDS:
-            result["methods"].append(_method(
-                mm.group("name"), i, line, (mm.group("ret") or "").strip(), owner, pending))
+            result["methods"].append(
+                _method(mm.group("name"), i, line, (mm.group("ret") or "").strip(), owner, pending)
+            )
             return "method"
     return ""
 
@@ -208,7 +262,7 @@ def _strip(raw: str, in_block_comment: bool) -> tuple[str, str, bool]:
                 return "".join(blanked), "".join(kept), True
             i, in_block_comment = j + 2, False
             continue
-        two = raw[i:i + 2]
+        two = raw[i : i + 2]
         if two == "//":
             break
         if two == "/*":
@@ -226,7 +280,7 @@ def _strip(raw: str, in_block_comment: bool) -> tuple[str, str, bool]:
                     break
                 j += 1
             blanked.append("''")
-            kept.append(raw[i:j + 1])
+            kept.append(raw[i : j + 1])
             i = j + 1
             continue
         blanked.append(ch)
@@ -271,8 +325,9 @@ def _visibility(line: str) -> str:
     return "public"
 
 
-def _type_info(name: str, kind: str, line_no: int, line: str,
-               pending: list[dict[str, str]]) -> dict[str, Any]:
+def _type_info(
+    name: str, kind: str, line_no: int, line: str, pending: list[dict[str, str]]
+) -> dict[str, Any]:
     decorators = [d["name"] for d in pending]
     return {
         "name": name,
@@ -288,8 +343,9 @@ def _type_info(name: str, kind: str, line_no: int, line: str,
     }
 
 
-def _method(name: str, line_no: int, line: str, ret: str, owner: str,
-            pending: list[dict[str, str]]) -> dict[str, Any]:
+def _method(
+    name: str, line_no: int, line: str, ret: str, owner: str, pending: list[dict[str, str]]
+) -> dict[str, Any]:
     return {
         "name": name,
         "line": line_no,
@@ -333,8 +389,11 @@ def _mapped_table(pending: list[dict[str, str]], name: str) -> str:
 
 
 def _record_imports(result: dict[str, Any], line: str, i: int) -> bool:
-    for pattern, kind in ((_IMPORT_FROM, "import"), (_EXPORT_FROM, "re-export"),
-                          (_REQUIRE, "require")):
+    for pattern, kind in (
+        (_IMPORT_FROM, "import"),
+        (_EXPORT_FROM, "re-export"),
+        (_REQUIRE, "require"),
+    ):
         m = pattern.match(line)
         if m:
             _add_import(result, m.group("mod"), m.group("what"), i, kind)
@@ -351,12 +410,14 @@ def _record_imports(result: dict[str, Any], line: str, i: int) -> bool:
 def _add_import(result: dict[str, Any], module: str, what: str, i: int, kind: str) -> None:
     names = _binding_names(what)
     if not names:
-        result["imports"].append({"fqn": module, "module": module, "name": "",
-                                  "line": i, "kind": kind})
+        result["imports"].append(
+            {"fqn": module, "module": module, "name": "", "line": i, "kind": kind}
+        )
         return
     for name in names:
-        result["imports"].append({"fqn": f"{module}/{name}", "module": module,
-                                  "name": name, "line": i, "kind": kind})
+        result["imports"].append(
+            {"fqn": f"{module}/{name}", "module": module, "name": name, "line": i, "kind": kind}
+        )
 
 
 def _binding_names(what: str) -> list[str]:

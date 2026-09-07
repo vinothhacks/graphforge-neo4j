@@ -1,8 +1,10 @@
 """MySQL / MariaDB schema extractor."""
+
 from __future__ import annotations
 
 from typing import ClassVar
 
+from ..core.errors import MissingExtra
 from .base import SchemaExtractor
 
 
@@ -17,10 +19,15 @@ class MySQLExtractor(SchemaExtractor):
         try:
             import mysql.connector
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "mysql-connector-python is not installed. Run: pip install mysql-connector-python"
+            raise MissingExtra(
+                "MySQL support is not installed. Run: pip install 'graphforge-neo4j[mysql]'"
             ) from exc
-        kwargs = {"host": self.host, "port": self.port, "user": self.user, "password": self.password}
+        kwargs = {
+            "host": self.host,
+            "port": self.port,
+            "user": self.user,
+            "password": self.password,
+        }
         if database:  # omit to connect at server level (for discovery)
             kwargs["database"] = database
         return mysql.connector.connect(**kwargs)
@@ -62,7 +69,8 @@ class MySQLExtractor(SchemaExtractor):
     def map_index(self, row: dict) -> dict:
         cols = row.get("columns") or ""
         return {
-            "name": row["name"], "table": row["table_name"],
+            "name": row["name"],
+            "table": row["table_name"],
             "isUnique": not bool(int(row.get("non_unique") or 0)),
             "indexType": row.get("index_type", ""),
             "columns": [c for c in cols.split(",") if c],

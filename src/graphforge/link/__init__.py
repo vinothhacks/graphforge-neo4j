@@ -5,6 +5,7 @@ separate subgraphs. Text-based passes (BASED_ON / USES_TABLE / CROSS_DB_REFERENC
 are heuristic substring matches and are scoped by database and a minimum table-name
 length to limit false positives; MAPS_TO is an exact JPA table-name match.
 """
+
 from .passes import PASSES, LinkRunner
 
 __all__ = ["PASSES", "LinkRunner"]

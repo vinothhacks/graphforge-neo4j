@@ -6,8 +6,91 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed — BREAKING
+
+- **Database drivers are now optional extras.** `pip install graphforge-neo4j` no
+  longer installs `mysql-connector-python`, `psycopg2-binary` and `pyodbc`; nor
+  `requests`, which only GitLab group discovery uses. Every one of them was
+  already imported lazily behind a guard, so bundling them only meant that
+  someone who wanted to graph a git repository still had to build `pyodbc` —
+  which needs a system ODBC driver and is the most likely of the three to fail
+  outright.
+
+  **To restore the previous behaviour in one line:**
+
+  ```bash
+  pip install 'graphforge-neo4j[all]'
+  ```
+
+  Or install just what you use: `[mysql]`, `[postgres]`, `[mssql]`, `[gitlab]`,
+  `[mcp]`. Running `graphforge db` against an engine whose driver is missing now
+  names the exact command to fix it, rather than the `pip install
+  'graphforge[mssql]'` it used to print — an extra that never existed, on a
+  distribution that is not called that.
+
+### Security
+
+- **Read guard: closed a bypass.** A backtick-quoted procedure name
+  (`` CALL `apoc.util.sleep`(1000) ``) matched no bare-identifier pattern, and an
+  unparseable `CALL` was simply not checked, so the deny-by-default allowlist was
+  never consulted. The allowlist now applies to every `CALL` site: a target that
+  cannot be resolved is a denial. Quoted identifiers are masked, which also fixes
+  the mirror-image false positive that rejected ``MATCH (n:`Pending DELETE`)``.
+- **Dashboard: drive-by CSRF and DNS rebinding.** A cross-origin `fetch` with
+  `Content-Type: text/plain` is a simple request and is sent with no preflight, so
+  any page you had open could reach the console. A foreign `Origin` is now
+  refused, and a loopback-bound server refuses any `Host` that is not loopback.
+- **Git credentials no longer travel in argv or the remote URL**, where they
+  reached `ps`, `.git/config`, and the git error text that `GitError` carried up
+  to the console. They go through a short-lived credential-helper file, and git
+  output is scrubbed before it is logged or raised.
+- `docker-compose.yml` no longer sets `apoc.*` unrestricted. graphforge needs no
+  APOC at all, and unrestricted grants `apoc.load.jdbc` / `apoc.load.json` —
+  outbound network and filesystem access — to anything that reaches the server.
+
+### Fixed
+
+- `read_cypher` corrupted multi-line Cypher. An existing `LIMIT` was detected by
+  searching the raw text for `" LIMIT "`, so a newline-formatted query looked
+  uncapped and got a second clause appended — `LIMIT 3\nLIMIT 200`, a syntax
+  error, on the shape an agent actually writes. A `" LIMIT "` inside a string
+  literal also suppressed the cap, and a standalone `CALL` was never capped.
+- Neo4j driver errors escaped as ~35-line tracebacks with exit code 1 instead of
+  the documented 2 — on `verify`, `init`, `status`, `search`, `ui`, and `mcp`.
+- `graphforge mcp` exited when the database was unreachable, so the client showed
+  only "server exited". The connection is now lazy: the client connects, the
+  tools list, and the reason reaches whoever asks a question.
+- A 5,000-file repository printed 5,000 progress bars, one per file.
+- `status` and `search` tables misaligned on any value longer than its fixed
+  column width — which is most real file paths.
+- `graphforge --version` reported a hardcoded `0.1.0` that had drifted from
+  `pyproject.toml`.
+
 ### Added
 
+- `graphforge quickstart` — guided first run: configure, connect, create the
+  schema, ingest, link, and register an MCP client.
+- `graphforge doctor` — checks the install, the connection and the graph, and
+  prints the command that fixes whatever is wrong.
+- `graphforge mcp install [--client …]` — writes the entry for Claude Code,
+  Claude Desktop and Cursor. Resolves the console script from the running
+  interpreter rather than `PATH`, and points at your `.env`, so no password is
+  written into a client config.
+- Dashboard: guided ingest, a first-run empty state, a clickable legend, a node
+  detail panel, canvas zoom/pan/drag/fit, and real node names on the canvas.
+- [SECURITY.md](SECURITY.md), and [ADR 9](docs/DESIGN.md) on the read guard.
+- `lint` and `types` are now blocking in CI; the secret scan covers GitHub, AWS,
+  Slack and private-key formats across all tracked files, not `glpat-` in three
+  file types; coverage has a floor (70%, measured baseline 79%).
+- Tests for `git/clone.py` and `git/discover.py`, which had none, and for
+  `cmd_status` / `cmd_verify`.
+
+- Layered read-query gate (`graphforge.query_guard`): procedure allowlist, clause
+  denies, limit cap; Neo4j read transactions for anything that still runs.
+- [docs/FEATURE_AUDIT.md](docs/FEATURE_AUDIT.md) — README / BUILD_PLAN / code / tests.
+- pytest markers `e2e_critical` / `e2e_full` and CI jobs (PR Neo4j HTTP/CLI, no
+  Chromium; main/nightly playground). Dashboard browser coverage is the Playwright
+  MCP agent runbook ([docs/DASHBOARD_E2E.md](docs/DASHBOARD_E2E.md)), not CI.
 - `graphforge search QUERY [--kind code|schema|all] [--repo NAME]` — case-insensitive
   codebase / schema search over the graph.
 - MCP tool `search_codebase` (same query as the CLI; paged).
@@ -224,9 +307,10 @@ All notable changes to this project are documented here. The format is based on
 - The `lint`, `types` and `integration` CI jobs are non-blocking on purpose —
   their configuration was authored without a ruff/mypy/docker binary available
   to verify it. Flipping them to blocking is tracked as a good first issue in
-  `CONTRIBUTING.md`.
+  `CONTRIBUTING.md`. *(lint and types became blocking in 0.3.0.)*
 - No dashboard screenshot is committed yet: capturing one needs a real browser
-  against a real graph. `docs/img/README.md` has the recipe.
+  against a real graph. `docs/img/README.md` has the recipe. *(Committed in
+  0.3.0.)*
 
 ## [0.1.0]
 

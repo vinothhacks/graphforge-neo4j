@@ -1,26 +1,38 @@
 """Microsoft SQL Server schema extractor (via pyodbc)."""
+
 from __future__ import annotations
 
+from ..core.errors import MissingExtra
 from .base import SchemaExtractor
 
 _SYSTEM_SCHEMAS = {
-    "sys", "INFORMATION_SCHEMA", "guest", "db_owner", "db_accessadmin",
-    "db_securityadmin", "db_ddladmin", "db_backupoperator", "db_datareader",
-    "db_datawriter", "db_denydatareader", "db_denydatawriter",
+    "sys",
+    "INFORMATION_SCHEMA",
+    "guest",
+    "db_owner",
+    "db_accessadmin",
+    "db_securityadmin",
+    "db_ddladmin",
+    "db_backupoperator",
+    "db_datareader",
+    "db_datawriter",
+    "db_denydatareader",
+    "db_denydatawriter",
 }
 
 
 class MssqlExtractor(SchemaExtractor):
     engine = "mssql"
-    placeholder = "?"                 # pyodbc paramstyle
+    placeholder = "?"  # pyodbc paramstyle
     default_schema_is_database = False
 
     def connect(self, database: str):
         try:
             import pyodbc
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "pyodbc is not installed. Run: pip install 'graphforge[mssql]' "
+            raise MissingExtra(
+                "SQL Server support is not installed. Run: "
+                "pip install 'graphforge-neo4j[mssql]' "
                 "(a system ODBC driver for SQL Server is also required)."
             ) from exc
         driver = self.driver or "ODBC Driver 18 for SQL Server"
@@ -67,7 +79,8 @@ class MssqlExtractor(SchemaExtractor):
     def map_index(self, row: dict) -> dict:
         cols = row.get("columns") or ""
         return {
-            "name": row["name"], "table": row["table_name"],
+            "name": row["name"],
+            "table": row["table_name"],
             "isUnique": bool(row.get("is_unique")),
             "indexType": row.get("index_type", ""),
             "columns": [c for c in cols.split(",") if c],

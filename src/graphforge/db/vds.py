@@ -11,6 +11,7 @@ via :class:`VdsConfig`, so the importer can target any similarly-shaped catalog.
 Row-fetching (`ingest`) is separated from graph-mapping (`write_rows`) so the
 mapping is unit-testable without a live database.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -66,12 +67,21 @@ class VdsIngestor:
         cols = [d[0].lower() for d in cur.description]
         return [dict(zip(cols, row)) for row in cur.fetchall()]
 
-    def ingest(self, engine: str, host: str, port: int, user: str, password: str,
-               database: str, driver: str | None = None) -> dict[str, int]:
+    def ingest(
+        self,
+        engine: str,
+        host: str,
+        port: int,
+        user: str,
+        password: str,
+        database: str,
+        driver: str | None = None,
+    ) -> dict[str, int]:
         from . import get_extractor
 
-        ex = get_extractor(engine, host=host, port=port, user=user,
-                           password=password, driver=driver)
+        ex = get_extractor(
+            engine, host=host, port=port, user=user, password=password, driver=driver
+        )
         conn = ex.connect(database)
         try:
             rows = self._fetch(conn)
@@ -92,46 +102,87 @@ class VdsIngestor:
             svc_id = f"vds://{db_id}/{sid}"
             if svc_id not in services:
                 services.add(svc_id)
-                ops.append(merge_node("VDSService", {"id": svc_id}, {
-                    "sid": sid, "serviceName": r.get("servicename", ""), "database": database,
-                }, comment=f"VDS service {sid}"))
+                ops.append(
+                    merge_node(
+                        "VDSService",
+                        {"id": svc_id},
+                        {
+                            "sid": sid,
+                            "serviceName": r.get("servicename", ""),
+                            "database": database,
+                        },
+                        comment=f"VDS service {sid}",
+                    )
+                )
 
             if r.get("query"):
                 q_id = f"vdsq://{db_id}/{sid}"
                 if q_id not in queries:
                     queries.add(q_id)
-                    ops.append(merge_node("VDSQuery", {"id": q_id}, {
-                        "sid": sid, "query": str(r["query"])[:10000],
-                        "coreTable": r.get("coretable", ""),
-                        "groupBy": r.get("groupby", ""), "orderBy": r.get("orderby", ""),
-                        "database": database,
-                    }))
-                    ops.append(merge_rel(NodeRef("VDSService", {"id": svc_id}), "HAS_QUERY",
-                                         NodeRef("VDSQuery", {"id": q_id})))
+                    ops.append(
+                        merge_node(
+                            "VDSQuery",
+                            {"id": q_id},
+                            {
+                                "sid": sid,
+                                "query": str(r["query"])[:10000],
+                                "coreTable": r.get("coretable", ""),
+                                "groupBy": r.get("groupby", ""),
+                                "orderBy": r.get("orderby", ""),
+                                "database": database,
+                            },
+                        )
+                    )
+                    ops.append(
+                        merge_rel(
+                            NodeRef("VDSService", {"id": svc_id}),
+                            "HAS_QUERY",
+                            NodeRef("VDSQuery", {"id": q_id}),
+                        )
+                    )
                     if r.get("coretable"):
-                        ops.append(Operation(
-                            "MATCH (q:VDSQuery {id: $q}) MATCH (t:Table) "
-                            "WHERE t.database = $db AND toLower(t.name) = toLower($ct) "
-                            "MERGE (q)-[:USES_TABLE]->(t)",
-                            {"q": q_id, "db": database, "ct": r["coretable"]}))
+                        ops.append(
+                            Operation(
+                                "MATCH (q:VDSQuery {id: $q}) MATCH (t:Table) "
+                                "WHERE t.database = $db AND toLower(t.name) = toLower($ct) "
+                                "MERGE (q)-[:USES_TABLE]->(t)",
+                                {"q": q_id, "db": database, "ct": r["coretable"]},
+                            )
+                        )
 
             if r.get("tablename") and r.get("columnname"):
                 wf_key = f"{sid}_{r.get('tablename')}_{r.get('columnname')}_{r.get('fieldname')}"
                 wf_id = f"vdsw://{db_id}/{wf_key}"
                 if wf_id not in wheres:
                     wheres.add(wf_id)
-                    ops.append(merge_node("VDSWhereField", {"id": wf_id}, {
-                        "sid": sid, "tableName": r.get("tablename", ""),
-                        "columnName": r.get("columnname", ""),
-                        "fieldName": r.get("fieldname", ""), "database": database,
-                    }))
-                    ops.append(merge_rel(NodeRef("VDSService", {"id": svc_id}), "HAS_WHERE_FIELD",
-                                         NodeRef("VDSWhereField", {"id": wf_id})))
-                    ops.append(Operation(
-                        "MATCH (w:VDSWhereField {id: $w}) MATCH (t:Table) "
-                        "WHERE t.database = $db AND toLower(t.name) = toLower($tn) "
-                        "MERGE (w)-[:REFERENCES_TABLE]->(t)",
-                        {"w": wf_id, "db": database, "tn": r["tablename"]}))
+                    ops.append(
+                        merge_node(
+                            "VDSWhereField",
+                            {"id": wf_id},
+                            {
+                                "sid": sid,
+                                "tableName": r.get("tablename", ""),
+                                "columnName": r.get("columnname", ""),
+                                "fieldName": r.get("fieldname", ""),
+                                "database": database,
+                            },
+                        )
+                    )
+                    ops.append(
+                        merge_rel(
+                            NodeRef("VDSService", {"id": svc_id}),
+                            "HAS_WHERE_FIELD",
+                            NodeRef("VDSWhereField", {"id": wf_id}),
+                        )
+                    )
+                    ops.append(
+                        Operation(
+                            "MATCH (w:VDSWhereField {id: $w}) MATCH (t:Table) "
+                            "WHERE t.database = $db AND toLower(t.name) = toLower($tn) "
+                            "MERGE (w)-[:REFERENCES_TABLE]->(t)",
+                            {"w": wf_id, "db": database, "tn": r["tablename"]},
+                        )
+                    )
 
         self.writer.write(ops, desc="vds")
         return {"services": len(services), "queries": len(queries), "whereFields": len(wheres)}

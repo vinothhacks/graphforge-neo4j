@@ -1,6 +1,8 @@
 """PostgreSQL schema extractor."""
+
 from __future__ import annotations
 
+from ..core.errors import MissingExtra
 from .base import SchemaExtractor, parse_index_columns
 
 
@@ -13,12 +15,15 @@ class PostgresExtractor(SchemaExtractor):
         try:
             import psycopg2
         except ImportError as exc:  # pragma: no cover
-            raise RuntimeError(
-                "psycopg2 is not installed. Run: pip install psycopg2-binary"
+            raise MissingExtra(
+                "PostgreSQL support is not installed. Run: pip install 'graphforge-neo4j[postgres]'"
             ) from exc
         return psycopg2.connect(
-            host=self.host, port=self.port, user=self.user,
-            password=self.password, dbname=database or "postgres",
+            host=self.host,
+            port=self.port,
+            user=self.user,
+            password=self.password,
+            dbname=database or "postgres",
         )
 
     def list_databases(self) -> list:
@@ -51,7 +56,8 @@ class PostgresExtractor(SchemaExtractor):
     def map_index(self, row: dict) -> dict:
         indexdef = row.get("indexdef", "") or ""
         return {
-            "name": row["name"], "table": row["table_name"],
+            "name": row["name"],
+            "table": row["table_name"],
             "isUnique": "UNIQUE INDEX" in indexdef.upper(),
             "indexType": "btree",
             "columns": parse_index_columns(indexdef),

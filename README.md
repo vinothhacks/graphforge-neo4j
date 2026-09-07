@@ -18,6 +18,7 @@ By default the git and database subgraphs live side by side but stay separate. O
 ## Contents
 
 - [Why a graph](#why-a-graph)
+- [Showcase video](#showcase-video)
 - [Install](#install)
 - [Connect](docs/CONNECT.md)
 - [Quickstart](#quickstart)
@@ -50,15 +51,36 @@ A single Cypher traversal answers each of these. Doing the same with two separat
 
 ---
 
+## Showcase video
+
+A three-minute narrated tour of the graphforge dashboard: the knowledge graph itself, its
+labels and relationship types, the read-only Cypher console, and every ingested source.
+
+[![graphforge](docs/showcase/linkedin-post.png)](docs/showcase/graphforge-showcase.mp4)
+
+**[▶ Watch graphforge-showcase.mp4](docs/showcase/graphforge-showcase.mp4)** (14 MB, 2 min 44 s) ·
+[banner](docs/showcase/github-social.png)
+
+The video is generated, not hand-edited. [`scripts/showcase/`](scripts/showcase/README.md)
+records the browser with Playwright, narrates it with edge-tts, and keeps audio and video aligned
+by holding each page on screen for exactly as long as its narration runs.
+`python scripts/showcase/render.py` rebuilds it; the finished files are copied to `docs/showcase/`.
+
+---
+
 ## Install
 
 ```bash
-pip install graphforge-neo4j            # Neo4j + MySQL/PostgreSQL/SQL Server drivers bundled
-pip install "graphforge-neo4j[mcp]"     # add the MCP server
-cp .env.example .env                    # then set your Neo4j password in .env
+pip install graphforge-neo4j                  # core: git ingest + the graph
+pip install "graphforge-neo4j[mcp]"           # + the MCP server
+pip install "graphforge-neo4j[postgres]"      # + a database driver: postgres | mysql | mssql
+pip install "graphforge-neo4j[all]"           # everything
+cp .env.example .env                          # then set your Neo4j password in .env
 ```
 
-The import package and CLI are both `graphforge` (only the PyPI distribution name is `graphforge-neo4j`). The Neo4j driver and all three database drivers install by default, so any source works out of the box — if a driver is already installed, pip leaves it alone.
+The import package and CLI are both `graphforge` (only the PyPI distribution name is `graphforge-neo4j`).
+
+**Database drivers are extras as of 0.3.** Every driver is imported lazily behind a guard, so bundling all three only meant that someone who wanted to graph a repository still had to build `pyodbc` — which needs a system ODBC driver and is the most likely of the three to fail. Pick the engine you use, or `[all]` for the previous behaviour. If you point `graphforge db` at an engine whose driver is missing, it tells you the exact command. `[gitlab]` adds GitLab group auto-discovery, the only feature that needs an HTTP client.
 
 From source:
 
@@ -75,6 +97,21 @@ Requires **Python 3.10+** and the `git` CLI. SQL Server additionally needs a sys
 ---
 
 ## Quickstart
+
+One command does the whole sequence below — it asks for anything it needs, checks
+each step before the next, and wires up an MCP client at the end:
+
+```bash
+graphforge quickstart
+```
+
+If anything goes wrong, at any point:
+
+```bash
+graphforge doctor        # what's broken, and the command that fixes it
+```
+
+The individual steps, if you'd rather drive them yourself:
 
 ```bash
 graphforge init                                   # create constraints + indexes
@@ -131,18 +168,21 @@ graphforge git /path/to/repo --dry-run            # just count the operations
 
 | Command | What it does |
 |---------|--------------|
+| `graphforge quickstart` | Guided first run: configure, connect, create the schema, ingest a repo and/or database, link them, and wire up an MCP client. `--yes` for a non-interactive run. |
+| `graphforge doctor` | Check the install, the connection, and the graph, and print the exact command to fix whatever is wrong. Start here when something breaks. |
 | `graphforge init` | Create the graph's constraints and indexes. |
 | `graphforge git [PATHS/URLS…]` | Ingest repositories: code structure + commit history. |
 | `graphforge db` | Ingest relational schemas (MySQL / PostgreSQL / SQL Server). |
-| `graphforge vds` | Optional: import a virtual-data-service / query catalog (see below). |
+| `graphforge vds` | Optional: import a VDS / query-service catalog (`vdsservicecatalog`, `querydetails`, `wherefieldconfig`) into `VDSService` / `VDSQuery` / `VDSWhereField` nodes. Flags: `--engine/--host/--port/--user/--password/--database/--driver` plus `--emit` / `--dry-run` / `--no-schema`. |
 | `graphforge link` | Create code↔database edges over the loaded graph. |
 | `graphforge status` | Show per-repository ingest status. |
 | `graphforge verify` | Report node counts per label. |
 | `graphforge search QUERY` | Case-insensitive search of File/Class/Method (`--kind code`, the default), Table/Column/StoredProcedure (`schema`), or both (`all`). Optional `--repo NAME`. |
 | `graphforge ui` | Serve the local web dashboard (graph canvas, Cypher console, masked config + live load status). |
 | `graphforge mcp` | Serve the graph over MCP (stdio). |
+| `graphforge mcp install` | Register graphforge with Claude Code / Claude Desktop / Cursor. Resolves the console script from the running interpreter and points at your `.env`, so no password is ever written into a client config. `--dry-run` to preview, `--remove` to undo. |
 
-Flags shared by the ingest commands: `--emit FILE`, `--dry-run`, `--no-schema`, `--replace`, and Neo4j overrides `--neo4j-uri/-user/-password/-database`, plus `--env FILE` to load a specific `.env`. Run any command with `--help` for its full list.
+Flags shared by the ingest commands (`init`, `git`, `db`, `vds`, `link`): `--emit FILE`, `--dry-run`, `--no-schema`, and Neo4j overrides `--neo4j-uri/-user/-password/-database`, plus `--env FILE` to load a specific `.env`. `--replace` is `git` and `db` only. Run any command with `--help` for its full list.
 
 **`graphforge git`**
 
@@ -336,7 +376,7 @@ Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.jso
 | Tool | Arguments | Purpose |
 |------|-----------|---------|
 | `get_schema` | `ttl`, `refresh` | Labels, relationship types, node counts per label. Cached for 60s by default; `refresh=true` forces a fresh read, `ttl=0` bypasses the cache. |
-| `read_cypher` | `query`, `limit` | Run a **read-only** Cypher query. Writes are rejected. |
+| `read_cypher` | `query`, `limit` | Run a **read-only** Cypher query. Writes, `LOAD CSV`, `USE`, `SHOW`, multi-statement, and unknown procedures are rejected. Allowed procedures: `db.labels`, `db.relationshipTypes`, `db.propertyKeys`. |
 | `search_nodes` | `label`, `prop`, `value`, `limit`, `offset` | Substring search on a property of a label. **Paged.** |
 | `node_neighbors` | `node_id`, `limit` | The immediate neighbourhood of a node `id`. |
 | `search_codebase` | `text`, `kind`, `repo`, `limit`, `offset` | Case-insensitive code and/or schema search. `kind` is `code` / `schema` / `all`. Optional `repo`. **Paged.** |
@@ -362,19 +402,27 @@ graphforge ui        # then open http://localhost:8000
 
 A **zero-dependency** local page — Python's stdlib HTTP server, one hand-written HTML file, no npm, no build step, and no CDN, so it works on an air-gapped box. It gives you:
 
-- **Force-directed graph canvas** — a live sample of the graph rendered in a `<canvas>`; click a node to expand its neighbours.
-- **Cypher console** — run read-only queries in the browser, with query history. Writes are refused **server-side** (HTTP 400) before a connection is even opened; the client is never trusted.
+- **Add data** — load a repository or a database schema from the page, watching the log as it runs. This is the one thing on the dashboard that writes; see the gating note below.
+- **Graph canvas** — a live sample rendered in a `<canvas>`, with real node names rather than truncated ids. Drag a node, scroll to zoom, drag the background to pan, double-click to fit. Click any node for a side panel with its full id, degree, and neighbours grouped by relationship type.
+- **Clickable legend** — every label with its count; click one to hide or show it on the canvas.
+- **Cypher console** — run read-only queries in the browser, with query history. Writes are refused **server-side** (HTTP 400) before a connection is even opened, with the guard's own reason; the client is never trusted.
 - **Label explorer** — click any label in the counts table for a modal of sample nodes and their properties.
 - **Search** — find nodes by substring, across all labels or scoped to one.
-- **Light / dark theme**, remembered across visits.
+- **Light / dark theme**, remembered across visits; the canvas palette re-tunes for each.
 - **Keyboard shortcuts** — `r` refresh, `/` focus search, `Esc` close modal / clear results (`Ctrl`/`Cmd`+`Enter` runs the query from inside the Cypher box).
-- The original status view: your resolved configuration with **passwords masked**, Neo4j connection health, node counts by label, and per-repository / per-database load status.
+- The status view: your resolved configuration with **passwords masked**, Neo4j connection health, node counts by label, and per-repository / per-database load status.
 
 Behind it are seven read-only JSON endpoints: `GET /api/status`, `/api/schema`, `/api/graph/sample`, `/api/search`, `/api/labels/<label>/sample`, `/api/node/<id>/neighbors`, and `POST /api/query`. Every one validates its input *before* opening a connection, so a rejected request provably never reaches the database.
 
+**How "Add data" is gated.** The page has no authentication, so the browser is the only thing between it and any site you have open. The ingest endpoints therefore do not exist unless the server is bound to loopback, and every request to them must carry a per-run token that is served inside the page — which a cross-origin script cannot read. A foreign `Origin`, or a `Host` that is not loopback, is refused outright. Run `graphforge ui --host 0.0.0.0` and ingest is simply not there, and the command says so.
+
 ### Screenshots
 
-There is no dashboard screenshot checked in yet — a real one has to come from a real browser against a real graph, and a placeholder would be worse than nothing. If you have graphforge running, capturing one is a ten-minute contribution: see [`docs/img/README.md`](docs/img/README.md) for the exact recipe (what to load, what to frame, where to save it, and what to check for before publishing a picture of your own configuration). Once `docs/img/dashboard.png` exists, this section gets the image.
+<img src="docs/img/dashboard.png" alt="graphforge dashboard: the graph canvas with a node selected, its neighbours grouped by relationship type in the detail panel, and node counts per label" width="900">
+
+The first thing you see with an empty graph:
+
+<img src="docs/img/dashboard-empty.png" alt="graphforge dashboard first run: an empty-graph panel explaining what graphforge does, with buttons to add a repository or a database" width="900">
 
 ---
 

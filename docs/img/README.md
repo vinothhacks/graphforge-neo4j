@@ -2,15 +2,13 @@
 
 Images used by the README and the docs.
 
-Right now this directory holds only these instructions. The README's
-[Screenshots](../../README.md#screenshots) section links here **instead of**
-embedding an image, deliberately: a screenshot of a dashboard has to be taken
-from a real browser rendering a real graph, and a hand-drawn mock or an empty
-placeholder file would be worse than an honest absence — it would show new users
-something that is not what they will get.
+`dashboard.png` (a populated graph, node selected) and `dashboard-empty.png`
+(the first-run state) are both embedded in the README's
+[Screenshots](../../README.md#screenshots) section.
 
-Capturing it is a genuinely small contribution and a good first PR. Here is the
-recipe.
+Both were taken from a real browser against a real graph, and any replacement
+must be too: a hand-drawn mock would show new users something that is not what
+they will get. Here is the recipe for retaking them.
 
 ## Capturing `dashboard.png`
 

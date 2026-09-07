@@ -1,0 +1,37 @@
+{
+  "tables": [{"name": "orders"}],
+  "columns": [
+    {
+      "table_name": "orders",
+      "name": "id",
+      "ordinal": 1,
+      "data_type": "int",
+      "is_nullable": "NO",
+      "column_default": null
+    },
+    {
+      "table_name": "orders",
+      "name": "status",
+      "ordinal": 2,
+      "data_type": "nvarchar",
+      "is_nullable": "YES",
+      "column_default": null
+    }
+  ],
+  "indexes": [
+    {
+      "table_name": "orders",
+      "name": "PK_orders",
+      "is_unique": true,
+      "index_type": "CLUSTERED",
+      "columns": "id"
+    }
+  ],
+  "procedures": [
+    {
+      "name": "usp_recalc",
+      "routine_type": "PROCEDURE",
+      "definition": "CREATE PROCEDURE usp_recalc AS UPDATE dbo.orders SET status = 'x'"
+    }
+  ]
+}

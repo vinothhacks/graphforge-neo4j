@@ -10,6 +10,7 @@ only matches a standalone ``os`` — never the ``os`` inside ``os_config`` or
 ``position``. This is plain Cypher: no APOC, and no regex escaping of table
 names (which routinely contain ``$``, ``#`` and other metacharacters).
 """
+
 from __future__ import annotations
 
 from collections.abc import Iterable
@@ -25,24 +26,55 @@ DEFAULT_MIN_NAME_LEN = 4
 # definition into space-delimited tokens; `_` and `$` stay inside the token, so
 # `os_config` never yields the token `os`.
 SEPARATORS = [
-    "\n", "\r", "\t", " ", "(", ")", ",", ";", ".", "=", "<", ">", "+", "-",
-    "*", "/", "%", "!", "?", "[", "]", "{", "}", "|", "&", "^", "~", ":",
-    "'", '"', "`", "@", "#", "\\",
+    "\n",
+    "\r",
+    "\t",
+    " ",
+    "(",
+    ")",
+    ",",
+    ";",
+    ".",
+    "=",
+    "<",
+    ">",
+    "+",
+    "-",
+    "*",
+    "/",
+    "%",
+    "!",
+    "?",
+    "[",
+    "]",
+    "{",
+    "}",
+    "|",
+    "&",
+    "^",
+    "~",
+    ":",
+    "'",
+    '"',
+    "`",
+    "@",
+    "#",
+    "\\",
 ]
 
 
 def _tokens_of(var: str) -> str:
     """Cypher expression: `var`.definition as a lower-cased, space-delimited token run."""
-    return (f"' ' + reduce(s = toLower({var}.definition), sep IN $seps | "
-            f"replace(s, sep, ' ')) + ' '")
+    return f"' ' + reduce(s = toLower({var}.definition), sep IN $seps | replace(s, sep, ' ')) + ' '"
 
 
 def _token_match(text_var: str, table_var: str) -> str:
     return f"{text_var} CONTAINS (' ' + toLower({table_var}.name) + ' ')"
 
 
-def matches_table(definition: str, table_name: str,
-                  min_name_len: int = DEFAULT_MIN_NAME_LEN) -> bool:
+def matches_table(
+    definition: str, table_name: str, min_name_len: int = DEFAULT_MIN_NAME_LEN
+) -> bool:
     """Python mirror of the Cypher token test — the executable spec for the passes.
 
     Kept in this module (and driven by the same ``SEPARATORS``) so the matching
@@ -117,8 +149,7 @@ class LinkRunner:
     def __init__(self, writer: Neo4jWriter):
         self.writer = writer
 
-    def run(self, names: Iterable[str],
-            min_name_len: int = DEFAULT_MIN_NAME_LEN) -> int:
+    def run(self, names: Iterable[str], min_name_len: int = DEFAULT_MIN_NAME_LEN) -> int:
         ops: list[Operation] = []
         for name in names:
             if name not in PASSES:

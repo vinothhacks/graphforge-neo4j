@@ -5,6 +5,7 @@ The BASED_ON / USES_TABLE / CROSS_DB_REFERENCE passes used to do a naive
 definition mentioning `os_config`, `position` or `cost`. They now compare
 space-delimited tokens.
 """
+
 from graphforge.cli import build_parser
 from graphforge.core.neo4j_writer import Neo4jWriter
 from graphforge.link.passes import (
@@ -65,12 +66,14 @@ def test_real_table_references_are_still_found():
 
 def test_tokens_survive_every_sql_separator():
     op = PASSES["uses-table"]()
-    for definition in ("SELECT * FROM dbo.orders;",
-                       "select*from orders,customers",
-                       "INSERT INTO [orders](id)VALUES(1)",
-                       "UPDATE\n\torders\nSET x=1",
-                       "SELECT 1 FROM `orders`",
-                       'JOIN "orders" ON 1=1'):
+    for definition in (
+        "SELECT * FROM dbo.orders;",
+        "select*from orders,customers",
+        "INSERT INTO [orders](id)VALUES(1)",
+        "UPDATE\n\torders\nSET x=1",
+        "SELECT 1 FROM `orders`",
+        'JOIN "orders" ON 1=1',
+    ):
         assert _simulate(op, definition, "orders") is True, definition
 
 
@@ -98,7 +101,7 @@ def test_every_text_pass_uses_token_matching():
 def test_matches_table_is_defensive():
     assert matches_table("", "orders") is False
     assert matches_table("select * from orders", "") is False
-    assert matches_table("SELECT * FROM ORDERS", "orders") is True   # case-insensitive
+    assert matches_table("SELECT * FROM ORDERS", "orders") is True  # case-insensitive
 
 
 # ---- CLI plumbing ---------------------------------------------------------

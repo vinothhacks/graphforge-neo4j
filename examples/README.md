@@ -110,6 +110,6 @@ Two of them take parameters. In the Neo4j Browser or `cypher-shell`:
 
 [`claude_desktop_config.json`](claude_desktop_config.json) is a complete
 `mcpServers` entry. Merge it into your client's config, set the Neo4j password,
-restart the client, and the [eleven read-only
+restart the client, and the [twelve read-only
 tools](../README.md#query-it-from-an-mcp-client) appear. `graphforge mcp` speaks
 stdio, so any MCP client works the same way.

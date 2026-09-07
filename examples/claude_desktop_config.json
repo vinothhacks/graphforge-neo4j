@@ -1,15 +1,9 @@
 {
-  "_comment": "Wire graphforge's MCP server into an MCP client (e.g. Claude Desktop). Merge this into the client's config, fill in your Neo4j password, then restart the client. Any MCP client that speaks stdio works the same way.",
+  "_comment": "You almost certainly do not need this file. Run `graphforge mcp install` and it writes the entry for you, into the right per-OS path, with the console script resolved from the interpreter graphforge is actually installed into. Use this only to merge by hand. Note there is no password here: --env points at your .env so the secret stays in one place. Replace the placeholder paths with absolute ones, then restart the client.",
   "mcpServers": {
     "graphforge": {
-      "command": "graphforge",
-      "args": ["mcp"],
-      "env": {
-        "NEO4J_URI": "bolt://127.0.0.1:7687",
-        "NEO4J_USER": "neo4j",
-        "NEO4J_PASSWORD": "please-change-me",
-        "NEO4J_DATABASE": "neo4j"
-      }
+      "command": "/absolute/path/to/graphforge",
+      "args": ["mcp", "--env", "/absolute/path/to/.env"]
     }
   }
 }
