@@ -3,6 +3,10 @@
 .env
 *.env
 !.env.example
+# `*.env` above matches only names ENDING in .env, so a local file like
+# audit.env.empty was not covered by it. Scoped rather than `*.env.*`, which would
+# also match .env.example and defeat the negation above.
+audit.env*
 # Showcase video renders: audio, frames, recordings, generated images, the mp4.
 scripts/showcase/out/
 # Playwright MCP scratch output.
