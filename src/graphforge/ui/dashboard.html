@@ -128,6 +128,7 @@
   .banner { background:var(--bad-soft); border:1px solid var(--bad);
     color:var(--bad); border-radius:12px; padding:12px 16px; font-size:13px; }
   .banner.ok { background:var(--ok-soft); border-color:var(--ok); color:var(--ok); }
+  .banner.warn { background:var(--warn-soft); border-color:var(--warn); color:var(--warn); }
   .empty { color:var(--muted); font-size:13px; padding:18px 4px; text-align:center; }
   .skel .line { height:14px; border-radius:6px; margin:8px 0;
     background:linear-gradient(90deg, var(--card), var(--card-2), var(--card)); background-size:200% 100%;
@@ -432,7 +433,11 @@ async function api(path, init){
   const res = await fetch(path, Object.assign({headers:{'Accept':'application/json'}}, init||{}));
   let data = null;
   try { data = await res.json(); } catch (e) { data = null; }
-  if (!res.ok) throw new Error((data && data.error) || ('request failed with status ' + res.status));
+  if (!res.ok){
+    const err = new Error((data && data.error) || ('request failed with status ' + res.status));
+    err.status = res.status;  // lets a caller tell "gone" (404) from a passing failure
+    throw err;
+  }
   return data || {};
 }
 
@@ -704,7 +709,6 @@ function pointerPos(ev){
   const rect = cv.getBoundingClientRect();
   return {x:ev.clientX - rect.left, y:ev.clientY - rect.top};
 }
-
 /* ---- detail panel ------------------------------------------------------ */
 function showDetailHint(){
   $('detail').innerHTML = '<div class="hint">Click a node to see what it is and what it '
@@ -881,7 +885,10 @@ async function loadSchema(){
    read another origin's HTML, so it cannot obtain it. The Cypher console stays
    read-only regardless. */
 const GF_TOKEN = (document.querySelector('meta[name="gf-token"]') || {}).content || '';
-let ingestPoll = 0;
+const INGEST_POLL_MS = 1200;
+/* Consecutive failed polls (about half a minute) before the page stops asking. */
+const INGEST_POLL_TRIES = 25;
+let ingestPoll = 0, ingestWatch = 0;
 
 function openIngest(kind){
   hide($('ingest-card'), false);
@@ -925,29 +932,59 @@ function renderIngest(job){
   hide($('ingest-log'), false);
   $('ingest-log').textContent = (job.lines || []).join('\n');
   $('ingest-log').scrollTop = $('ingest-log').scrollHeight;
-  $('ingest-count').textContent = job.state === 'running'
-    ? `${job.kind} · running…` : `${job.kind} · ${job.state}`;
+  $('ingest-count').textContent = job.state === 'running' ? `${job.kind} · running…`
+    : job.state === 'done' && job.failed ? `${job.kind} · done, ${job.failed} failed`
+    : `${job.kind} · ${job.state}`;
+}
+/* A finished job's banner. "done" with failures loaded some sources but not
+   all -- the server reports it that way so a partly-failed batch still refreshes
+   the graph, but it must not read as a clean success. */
+function ingestOutcome(job){
+  if (job.state === 'done' && job.failed)
+    return `<div class="banner warn">Loaded ${esc(job.summary)}. Failed: ${esc(job.error || 'see the log')}</div>`;
+  if (job.state === 'done')
+    return `<div class="banner ok">Loaded ${esc(job.summary || 'successfully')}.</div>`;
+  return `<div class="banner">Ingest failed: ${esc(job.error || 'see the log')}</div>`;
 }
 function watchIngest(job){
   renderIngest(job);
-  clearInterval(ingestPoll);
-  ingestPoll = setInterval(async () => {
+  clearTimeout(ingestPoll);
+  const watch = ++ingestWatch;  // a newer watch retires this one
+  let misses = 0;
+  /* Chained timeouts rather than setInterval: a slow response can then never
+     overlap the next poll, or land after it and repaint a stale state. */
+  const poll = async () => {
+    let now;
     try {
-      const now = await api('/api/ingest/' + encodeURIComponent(job.id));
-      renderIngest(now);
-      if (now.state === 'running') return;
-      clearInterval(ingestPoll);
-      $('ingest-run').disabled = false;
-      $('ingest-banner').innerHTML = now.state === 'done'
-        ? `<div class="banner ok">Loaded ${esc(now.summary || 'successfully')}.</div>`
-        : `<div class="banner">${esc(now.error || 'ingest failed')}</div>`;
-      if (now.state === 'done'){ load(); loadSchema(); loadGraph(); }
+      now = await api('/api/ingest/' + encodeURIComponent(job.id));
     } catch (e) {
-      clearInterval(ingestPoll);
-      $('ingest-run').disabled = false;
-      $('ingest-banner').innerHTML = `<div class="banner">${esc(e.message)}</div>`;
+      if (watch !== ingestWatch) return;
+      /* A failed poll says nothing about the ingest, which carries on in the
+         server whether or not anyone is watching. Keep asking -- unless the
+         server says the job does not exist (it restarted), or it has been
+         unreachable for long enough that waiting longer is pointless. */
+      misses += 1;
+      if (e.status === 404 || misses >= INGEST_POLL_TRIES){
+        $('ingest-run').disabled = false;
+        $('ingest-banner').innerHTML = e.status === 404
+          ? `<div class="banner">${esc(e.message)}</div>`
+          : `<div class="banner">Lost contact with the dashboard server (${esc(e.message)}). `
+            + `The ingest may still be running; reload the page to check.</div>`;
+        return;
+      }
+      $('ingest-banner').innerHTML = `<div class="banner warn">Could not check on the ingest (${esc(e.message)}); retrying…</div>`;
+      ingestPoll = setTimeout(poll, INGEST_POLL_MS);
+      return;
     }
-  }, 1200);
+    if (watch !== ingestWatch) return;
+    if (misses){ misses = 0; $('ingest-banner').innerHTML = ''; }
+    renderIngest(now);
+    if (now.state === 'running'){ ingestPoll = setTimeout(poll, INGEST_POLL_MS); return; }
+    $('ingest-run').disabled = false;
+    $('ingest-banner').innerHTML = ingestOutcome(now);
+    if (now.state === 'done'){ load(); loadSchema(); loadGraph(); }
+  };
+  ingestPoll = setTimeout(poll, INGEST_POLL_MS);
 }
 
 /* ---- label explorer modal --------------------------------------------- */
