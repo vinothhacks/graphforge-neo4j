@@ -709,6 +709,7 @@ function pointerPos(ev){
   const rect = cv.getBoundingClientRect();
   return {x:ev.clientX - rect.left, y:ev.clientY - rect.top};
 }
+
 /* ---- detail panel ------------------------------------------------------ */
 function showDetailHint(){
   $('detail').innerHTML = '<div class="hint">Click a node to see what it is and what it '
