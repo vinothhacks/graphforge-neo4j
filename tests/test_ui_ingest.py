@@ -165,11 +165,11 @@ def test_a_password_with_a_space_never_reaches_the_browser(monkeypatch):
 
 
 # U+2100 ("a/c") hides a "/" that urllib finds under NFKC, and it quotes the
-# authority it read ("gf:hunter2℀") in refusing it. With a colon before the
+# authority it read ("gf:hunter2\u2100") in refusing it. With a colon before the
 # cut, the git layer's rule found no userinfo at all, and the source showed it.
 @pytest.mark.parametrize(
     "cut",
-    ["/", "?", "#", "℀/", ":1/", ":/", ":5432?", ":#"],
+    ["/", "?", "#", "\u2100/", ":1/", ":/", ":5432?", ":#"],
     ids=["slash", "query", "hash", "nfkc", "port", "empty-port", "port-query", "colon-hash"],
 )
 def test_a_database_url_urllib_cannot_parse_quotes_no_part_of_the_password(
