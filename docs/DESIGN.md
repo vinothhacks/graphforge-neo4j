@@ -337,15 +337,21 @@ it cannot read `lastCommit` when there is no connection.
 
 ### ADR 9: The read guard is a tokenizer, not a keyword search
 
-**Decision.** `graphforge.query_guard` decides whether a query may run, by
-masking everything the user controls as *data* and then reasoning about what is
-left. Strings, comments and backtick-quoted identifiers are blanked; the
-remaining text is checked for write clauses, for `LOAD CSV` / `USE` / `SHOW`, for
-multiple statements, and for a `LIMIT` above the cap. Procedures are
-**deny-by-default**: every `CALL` site must resolve to a name on a three-entry
-allowlist, and a target that cannot be resolved is a denial. The caller then runs
-the query inside a Neo4j read transaction with a timeout, so even a defeated
-guard cannot write.
+**Decision.** `graphforge.query_guard` decides whether a query may run from the
+tokens of one small lexer that follows Neo4j's own quoting rules: strings with
+backslash escapes, backtick identifiers with doubled-backtick escapes, `//` and
+`/* */` comments. Everything the user controls as *data* is a single token, and
+every check reads the same token stream: write clauses, `LOAD CSV` anywhere,
+`USE` and the administration commands (`SHOW`, `TERMINATE`, `GRANT`, ...)
+wherever a clause can begin, multiple statements, and a `LIMIT` above the cap.
+Procedures are **deny-by-default**: every `CALL` site must resolve to a name on a
+three-entry allowlist, and a target that cannot be resolved is a denial.
+Namespaced functions are refused too unless the namespace is one of Neo4j's own
+(`date`, `duration`, `point`, ...), since a plugin function can run Cypher of its
+own. An unterminated literal fails closed. The caller then runs the query inside
+a Neo4j read transaction with a timeout, so even a defeated guard cannot write.
+`mask_query`, which blanks the data tokens, remains for callers that only need
+to look for `RETURN` / `LIMIT`.
 
 One implementation, two callers: the MCP `read_cypher` tool and the dashboard's
 `POST /api/query`. Both reject before opening a connection, and the test corpus
@@ -371,6 +377,16 @@ have closed the visible hole and left the real one: a `CALL` the parser could no
 read was *not checked at all*. Deny-by-default over every `CALL` site is what
 makes the next unparseable form fail closed instead of open. A guard that only
 inspects what it can parse is not deny-by-default, whatever its allowlist says.
+
+The second version still masked first and then ran regexes over the masked
+text, and review found that the two could disagree. A step that lifted quoted
+procedure names out *before* masking let a backtick name containing `CALL`
+re-pair the quotes around a real call; the masker ignored backslash escapes and
+treated `''` as an escape (SQL, not Cypher), so its string boundaries drifted
+from Neo4j's; `LOAD CSV` / `USE` / `SHOW` were only refused at the very start of
+the statement; and function calls were never inspected at all. Every one was
+two readers of the same text disagreeing. Hence one lexer, and checks that read
+its tokens rather than re-reading the text.
 
 ---
 
