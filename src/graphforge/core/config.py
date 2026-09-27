@@ -36,6 +36,17 @@ def _csv(value: str | None) -> list[str]:
     return [item.strip() for item in value.split(",") if item.strip()]
 
 
+def allow_empty_password() -> bool:
+    """Whether ``GF_ALLOW_EMPTY_PASSWORD`` opts in to a server with auth disabled.
+
+    The one reading of the flag, parsed like every other boolean setting: the
+    doctor and quickstart used to test the raw string for truthiness, so
+    ``false`` and ``0`` counted as "allowed" there while
+    :meth:`Neo4jSettings.check_connectable` refused the same value.
+    """
+    return _bool(os.getenv("GF_ALLOW_EMPTY_PASSWORD"), False)
+
+
 @dataclass
 class Neo4jSettings:
     uri: str = "bolt://127.0.0.1:7687"
@@ -64,7 +75,7 @@ class Neo4jSettings:
         """
         if self.password:
             return
-        if _bool(os.getenv("GF_ALLOW_EMPTY_PASSWORD"), False):
+        if allow_empty_password():
             return  # a server started with NEO4J_AUTH=none
         raise ValueError(
             "NEO4J_PASSWORD is not set.\n"

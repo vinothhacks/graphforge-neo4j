@@ -27,7 +27,6 @@ import shutil
 import socket
 import subprocess
 import sys
-import tempfile
 import time
 import urllib.error
 import urllib.request
@@ -706,6 +705,10 @@ done, the logic behind each page, and the tech stack. Regenerate it with
 Assets: graphforge-showcase.mp4 (the video), github-social.png, linkedin-post.png.
 """
 
+# GITHUB_REPO is OWNER/REPO with no host, and every URL and the REST fallback below are
+# github.com -- so that is the one host gh has to be logged in to, and the one it publishes to.
+GITHUB_HOST = "github.com"
+
 
 def _git(*a: str) -> str:
     return run(["git", *a], cwd=str(REPO)).stdout.strip()
@@ -735,13 +738,19 @@ def stage_publish(args) -> None:
         )
 
     gh = shutil.which("gh")
-    if gh and subprocess.run([gh, "auth", "status"], capture_output=True).returncode != 0:
-        log("gh is installed but not logged in (run: gh auth login -w) -- trying other routes")
-        gh = None
+    if gh:
+        # --hostname: a bare `gh auth status` exits 1 when ANY configured host has an auth
+        # problem (a stale enterprise login, say), which would skip gh with github.com logged in.
+        auth = [gh, "auth", "status", "--hostname", GITHUB_HOST]
+        if subprocess.run(auth, capture_output=True).returncode != 0:
+            log(f"gh is not logged in to {GITHUB_HOST} (run: gh auth login -w) -- trying others")
+            gh = None
     token = os.environ.get("GITHUB_TOKEN")
     if gh:
-        notes = Path(tempfile.mkstemp(suffix=".md")[1])
-        notes.write_text(RELEASE_NOTES, encoding="utf-8")
+        # Notes go in on stdin, not through a temp file: nothing is left behind when gh fails,
+        # and nothing has to be deleted afterwards (Windows refuses while a handle is open).
+        # --repo names the host so gh publishes where the check above looked, not wherever
+        # GH_HOST or its config would point a bare OWNER/REPO.
         run(
             [
                 gh,
@@ -750,16 +759,17 @@ def stage_publish(args) -> None:
                 RELEASE_TAG,
                 *map(str, assets),
                 "--repo",
-                GITHUB_REPO,
+                f"{GITHUB_HOST}/{GITHUB_REPO}",
                 "--target",
                 BRANCH,
                 "--title",
                 "graphforge showcase video",
                 "--notes-file",
-                str(notes),
-            ]
+                "-",
+            ],
+            input=RELEASE_NOTES,
+            encoding="utf-8",
         )
-        notes.unlink()
         log(f"publish OK via gh: https://github.com/{GITHUB_REPO}/releases/tag/{RELEASE_TAG}")
     elif token:
         api = f"https://api.github.com/repos/{GITHUB_REPO}"
