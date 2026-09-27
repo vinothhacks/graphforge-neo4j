@@ -10,14 +10,19 @@ they call `cmd_init` / `cmd_git` / `cmd_db` / `cmd_link` like anybody else would
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
-from .core.config import Settings
+from .core.config import Settings, allow_empty_password
 
 OK, WARN, FAIL, INFO = "ok", "warn", "fail", "info"
+
+#: The oldest ``mcp`` major the server runs on: 2.0 is where FastMCP became
+#: MCPServer. Keep in step with the ``mcp>=2`` pin in pyproject.toml.
+MIN_MCP_MAJOR = 2
 
 _MARKS = {OK: ("v", "✓"), WARN: ("!", "!"), FAIL: ("x", "✗"), INFO: ("-", "·")}
 
@@ -57,6 +62,31 @@ def _driver_status(module: str, engine: str, extra: str) -> Check:
     return Check(OK, f"{engine} driver", module)
 
 
+def _mcp_status() -> Check:
+    """Whether the MCP server can run: installed *and* new enough.
+
+    ``import mcp`` alone passed on 1.x, which the server cannot use, so the
+    doctor said "installed" while ``graphforge mcp`` failed. The version comes
+    from the distribution metadata, so nothing is imported to find it.
+    """
+    from importlib import metadata
+
+    fix = "pip install -U 'graphforge-neo4j[mcp]'"
+    try:
+        installed = metadata.version("mcp")
+    except metadata.PackageNotFoundError:
+        return Check(WARN, "mcp extra", "not installed", f"{fix} to serve the graph")
+    major = re.match(r"\d+", installed)
+    if not major or int(major.group()) < MIN_MCP_MAJOR:
+        return Check(
+            WARN,
+            "mcp extra",
+            f"mcp {installed} is installed, but the server needs mcp>={MIN_MCP_MAJOR}",
+            fix,
+        )
+    return Check(OK, "mcp extra", f"mcp {installed}")
+
+
 def run_checks(settings: Settings, env_path: Path | None = None) -> list[Check]:
     """Everything `doctor` inspects, as data, so it is testable without a console."""
     checks: list[Check] = []
@@ -92,8 +122,10 @@ def run_checks(settings: Settings, env_path: Path | None = None) -> list[Check]:
 
     neo = settings.neo4j
     checks.append(Check(OK, "NEO4J_URI", neo.uri))
-    if neo.password or os.getenv("GF_ALLOW_EMPTY_PASSWORD"):
+    if neo.password:
         checks.append(Check(OK, "NEO4J_PASSWORD", "set"))
+    elif allow_empty_password():
+        checks.append(Check(OK, "NEO4J_PASSWORD", "empty (GF_ALLOW_EMPTY_PASSWORD is on)"))
     else:
         checks.append(
             Check(FAIL, "NEO4J_PASSWORD", "not set", "set it in .env, or pass --neo4j-password")
@@ -107,27 +139,14 @@ def run_checks(settings: Settings, env_path: Path | None = None) -> list[Check]:
     checks.append(_driver_status("psycopg2", "PostgreSQL", "postgres"))
     checks.append(_driver_status("pyodbc", "SQL Server", "mssql"))
 
-    try:
-        import mcp  # noqa: F401
-
-        checks.append(Check(OK, "mcp extra", "installed"))
-    except ImportError:
-        checks.append(
-            Check(
-                WARN,
-                "mcp extra",
-                "not installed",
-                "pip install 'graphforge-neo4j[mcp]' to serve the graph",
-            )
-        )
-
+    checks.append(_mcp_status())
     checks.extend(_client_checks())
     return checks
 
 
 def _graph_checks(settings: Settings) -> list[Check]:
     """Reach the database and report what is actually in it."""
-    if not (settings.neo4j.password or os.getenv("GF_ALLOW_EMPTY_PASSWORD")):
+    if not (settings.neo4j.password or allow_empty_password()):
         return [Check(INFO, "neo4j", "skipped (no password configured)")]
     from .mcp.server import GraphQuery
 
@@ -170,14 +189,23 @@ def _graph_checks(settings: Settings) -> list[Check]:
 
 
 def _client_checks() -> list[Check]:
-    from .mcp.clients import known_clients
+    from .mcp.clients import ClientConfigError, known_clients
 
-    wired = [c for c in known_clients() if c.has_graphforge()]
+    wired: list[str] = []
+    broken: list[Check] = []
+    for client in known_clients():
+        try:
+            if client.has_graphforge():
+                wired.append(client.label)
+        except ClientConfigError as exc:
+            # `mcp install` refuses to touch this file, so say so here first.
+            fix = f"fix or move {client.path} - `mcp install` leaves it alone until then"
+            broken.append(Check(WARN, "mcp config", str(exc), fix))
     if wired:
-        return [Check(OK, "mcp clients", ", ".join(c.label for c in wired))]
+        return [Check(OK, "mcp clients", ", ".join(wired)), *broken]
     present = [c for c in known_clients() if c.path.exists()]
     detail = "none wired up" + (f" ({len(present)} client config(s) found)" if present else "")
-    return [Check(WARN, "mcp clients", detail, "graphforge mcp install")]
+    return [Check(WARN, "mcp clients", detail, "graphforge mcp install"), *broken]
 
 
 def report(checks: list[Check], out=None) -> int:
@@ -282,7 +310,7 @@ def quickstart(args) -> int:
     _step(1, total, "Configuration")
     env_file = Path(getattr(args, "env", None) or ".env")
     settings = _settings(args)
-    if not settings.neo4j.password and not os.getenv("GF_ALLOW_EMPTY_PASSWORD"):
+    if not settings.neo4j.password and not allow_empty_password():
         if yes:
             print("error: NEO4J_PASSWORD is not set and --yes cannot invent one.", file=sys.stderr)
             return 2
