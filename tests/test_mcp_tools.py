@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 import pytest
@@ -29,13 +30,30 @@ class _Rec:
         return self._data
 
 
+class _Result:
+    """Stands in for a neo4j Result: lazy, like the real one, and counts what is pulled.
+
+    A list would hide the difference between reading ``limit`` records and
+    reading every record then slicing; ``driver.pulled`` makes it visible.
+    """
+
+    def __init__(self, driver, rows):
+        self.driver = driver
+        self.rows = rows
+
+    def __iter__(self):
+        for row in self.rows:
+            self.driver.pulled += 1
+            yield _Rec(row)
+
+
 class _Tx:
     def __init__(self, driver):
         self.driver = driver
 
     def run(self, cypher, params=None, **_kwargs):
         self.driver.executed.append((cypher, dict(params or {})))
-        return [_Rec(row) for row in self.driver.rows_for(cypher)]
+        return _Result(self.driver, self.driver.rows_for(cypher))
 
 
 class _Session:
@@ -65,6 +83,8 @@ class FakeDriver:
         self.rows = list(rows or [])
         self.script = list(script or [])
         self.closed = False
+        #: Records handed out across every result, i.e. what the caller iterated.
+        self.pulled = 0
 
     def rows_for(self, cypher):
         for needle, rows in self.script:
@@ -210,6 +230,26 @@ def test_a_limit_on_its_own_line_is_not_a_missing_limit():
     assert sent.upper().count("LIMIT") == 1, sent
 
 
+@pytest.mark.parametrize(
+    ("cypher", "sent"),
+    [
+        ("MATCH (n) RETURN n;\r\n", "MATCH (n) RETURN n\nLIMIT 25"),
+        ("MATCH (n) RETURN n;\t;", "MATCH (n) RETURN n\nLIMIT 25"),
+        ("MATCH (n) RETURN n LIMIT 3; ;\n", "MATCH (n) RETURN n LIMIT 3"),
+    ],
+)
+def test_trailing_semicolons_and_whitespace_are_dropped_before_running(cypher, sent):
+    """The guard admits any trailing run of ";" and whitespace, Neo4j does not.
+
+    Only "; \\n" used to be stripped, so a Windows line ending left the ";" in
+    front of the appended LIMIT, and "; ;" went to the server as written: both
+    passed the guard and then failed in Neo4j with a syntax error.
+    """
+    graph = GraphQuery(FakeDriver(), "neo4j")
+    graph.read_cypher(cypher, limit=25)
+    assert graph.driver.cyphers[0] == sent
+
+
 def test_a_limit_inside_a_string_literal_does_not_suppress_the_cap():
     """`' LIMIT '` as data used to read as `LIMIT` as code, skipping the row cap."""
     graph = GraphQuery(FakeDriver(), "neo4j")
@@ -226,6 +266,69 @@ def test_a_standalone_call_is_capped_without_being_made_invalid():
         "appending LIMIT breaks a standalone CALL"
     )
     assert len(rows) == 10, "a standalone CALL returned more rows than the cap"
+
+
+@pytest.mark.parametrize(
+    "cypher",
+    [
+        "MATCH (n) CALL { WITH n MATCH (n)-->(m) RETURN m LIMIT 1 } RETURN n, m",
+        "MATCH (n) WHERE EXISTS { MATCH (n)-->(m) RETURN m LIMIT 1 } RETURN n",
+        "MATCH (n) RETURN n, COUNT { MATCH (n)-->(m) RETURN m LIMIT 3 } AS c",
+        "MATCH (n)\nRETURN n, COLLECT {\n  MATCH (n)-->(m) RETURN m.name LIMIT 5\n} AS names",
+        # the last UNION branch is the one the final RETURN belongs to
+        "MATCH (a:A) RETURN a.name AS x LIMIT 5 UNION MATCH (b:B) RETURN b.name AS x",
+        # a property, a parameter and a label that merely spell LIMIT
+        "MATCH (n) RETURN n.limit AS cap",
+        "MATCH (n) WHERE n.size < $limit RETURN n",
+        "MATCH (n) RETURN n:Limit AS capped",
+    ],
+)
+def test_a_limit_that_is_not_the_final_returns_does_not_suppress_the_cap(cypher):
+    """Only a LIMIT on the final top-level RETURN caps what the query yields.
+
+    One inside ``CALL { }`` or an ``EXISTS`` / ``COUNT`` / ``COLLECT`` block
+    limits that subquery alone, yet it used to count as the outer cap, so the
+    query went out uncapped and every row it produced was loaded.
+    """
+    graph = GraphQuery(FakeDriver(), "neo4j")
+    graph.read_cypher(cypher, limit=17)
+    sent = graph.driver.cyphers[0]
+    assert sent.endswith("\nLIMIT 17"), sent
+
+
+@pytest.mark.parametrize(
+    "cypher",
+    [
+        "MATCH (n) CALL { WITH n MATCH (n)-->(m) RETURN m LIMIT 1 } RETURN n, m LIMIT 3",
+        "MATCH (n)\nRETURN n, COUNT { MATCH (n)-->(m) RETURN m LIMIT 3 } AS c\nORDER BY c\nLIMIT 4",
+        "MATCH (a:A) RETURN a.name AS x UNION MATCH (b:B) RETURN b.name AS x LIMIT 5",
+    ],
+)
+def test_the_final_returns_own_limit_still_stops_a_second_one(cypher):
+    """Looking past subqueries must not start doubling a LIMIT that is really there."""
+    graph = GraphQuery(FakeDriver(), "neo4j")
+    graph.read_cypher(cypher, limit=17)
+    assert graph.driver.cyphers[0] == cypher
+
+
+@pytest.mark.parametrize(
+    "cypher",
+    [
+        "CALL db.labels()",  # takes no LIMIT clause at all
+        "MATCH (n) RETURN n LIMIT 400",  # the user's own LIMIT, above the cap
+        "MATCH (a:A) RETURN a AS x UNION MATCH (b:B) RETURN b AS x LIMIT 5",
+    ],
+)
+def test_read_cypher_never_fetches_more_records_than_the_limit(cypher):
+    """The row cap bounds memory: records past `limit` are never pulled or built.
+
+    Slicing afterwards returned the right number of rows, but only after every
+    record the query produced had been turned into a dict first.
+    """
+    driver = FakeDriver(rows=[{"label": f"L{i}"} for i in range(5000)])
+    rows = GraphQuery(driver, "neo4j").read_cypher(cypher, limit=10)
+    assert len(rows) == 10
+    assert driver.pulled == 10, f"{driver.pulled} records pulled for a limit of 10"
 
 
 def test_ui_routes_still_work_over_the_new_module():
@@ -1026,6 +1129,61 @@ def test_read_cypher_tool_still_refuses_a_write():
         server.tools["read_cypher"]("MATCH (n) DETACH DELETE n")
 
 
+def test_read_cypher_description_tracks_the_guard_tables():
+    """Agents plan queries from this text, so it has to say what the guard refuses.
+
+    The guard gained a function-namespace layer (so every ``apoc.*`` call is
+    refused, not just ``CALL apoc.*``) and an administration-command deny, while
+    the description still listed only writes, LOAD CSV, USE, SHOW and procedures.
+    Checking against the guard's own tables means a namespace or procedure added
+    there fails this test until the description names it too.
+    """
+    from graphforge.query_guard import BUILTIN_FUNCTION_NAMESPACES, READ_PROCEDURES
+
+    server = _build_server_with_fakes(FakeDriver())
+    tools = {t.name: t for t in asyncio.run(server.list_tools())}
+    doc = (tools["read_cypher"].description or "").lower()
+    # Whole dotted words, so "date" is not satisfied by "datetime".
+    words = set(re.findall(r"\w+(?:\.\w+)*", doc))
+    for name in sorted(BUILTIN_FUNCTION_NAMESPACES | READ_PROCEDURES):
+        assert name in words, f"read_cypher description does not mention {name}"
+    for phrase in ("plugin functions", "apoc.*", "administration commands", "terminate"):
+        assert phrase in doc, phrase
+
+
+@pytest.mark.parametrize(
+    ("cypher", "reason"),
+    [
+        ("MATCH (n) RETURN apoc.text.join(['a', 'b'], ',') AS s", "plugin function"),
+        ("RETURN apoc.coll.toSet([1, 1]) AS s", "plugin function"),
+        ("RETURN gds.version() AS v", "plugin function"),
+        ("RETURN db.nameFromElementId('4:x:0') AS v", "plugin function"),
+        ("TERMINATE TRANSACTIONS 'neo4j-transaction-1'", "TERMINATE is not allowed"),
+        ("GRANT ROLE reader TO alice", "GRANT is not allowed"),
+    ],
+)
+def test_read_cypher_tool_refuses_what_its_description_says(cypher, reason):
+    driver = FakeDriver()
+    server = _build_server_with_fakes(driver)
+    with pytest.raises(ValueError, match=re.escape(reason)):
+        server.tools["read_cypher"](cypher)
+    assert driver.executed == [], "a refused query reached the database"
+
+
+def test_read_cypher_tool_admits_the_functions_its_description_allows():
+    driver = FakeDriver(rows=[{"d": 1}])
+    server = _build_server_with_fakes(driver)
+    admitted = (
+        "RETURN date.truncate('day', date()) AS d",
+        "RETURN duration.between(date(), date()) AS d",
+        "RETURN vector.similarity.cosine([1.0], [1.0]) AS d",
+        "RETURN coalesce(toLower('A'), '') AS d",
+    )
+    for cypher in admitted:
+        assert json.loads(server.tools["read_cypher"](cypher)) == [{"d": 1}], cypher
+    assert len(driver.executed) == len(admitted)
+
+
 def test_get_schema_tool_exposes_ttl_and_refresh():
     driver = _schema_driver()
     server = _build_server_with_fakes(driver)
@@ -1037,3 +1195,153 @@ def test_get_schema_tool_exposes_ttl_and_refresh():
     server.tools["get_schema"](0)  # ttl=0 bypasses
     assert _label_queries(driver) == 3
     mcp.clear_schema_cache()
+
+
+# ================================================================= connecting ==
+_UNREACHABLE = Neo4jSettings(uri="bolt://example.invalid:7687", password="pw")
+
+
+class _DialledDriver(FakeDriver):
+    """What the patched ``GraphDatabase.driver`` hands out: it can find Neo4j down."""
+
+    def __init__(self, server, **kwargs):
+        super().__init__(**kwargs)
+        self.server = server
+
+    def verify_connectivity(self):
+        if not self.server.up:
+            from neo4j.exceptions import ServiceUnavailable
+
+            raise ServiceUnavailable("Couldn't connect to example.invalid:7687")
+
+    def close(self):
+        super().close()
+        if self.server.close_fails:
+            raise OSError("socket already gone")
+
+
+class _Neo4jServer:
+    """Stands in for ``neo4j.GraphDatabase``: records every driver built, and can be down."""
+
+    def __init__(self):
+        self.up = False
+        self.close_fails = False
+        self.fault: Exception | None = None
+        self.dials = 0
+        self.drivers: list[_DialledDriver] = []
+
+    def driver(self, uri, auth=None, **_kwargs):
+        self.dials += 1
+        if self.fault is not None:
+            raise self.fault
+        driver = _DialledDriver(self, rows=[{"n": 1}])
+        self.drivers.append(driver)
+        return driver
+
+    @property
+    def leaked(self) -> int:
+        return sum(1 for d in self.drivers if not d.closed)
+
+
+@pytest.fixture
+def neo4j_server(monkeypatch):
+    import neo4j
+
+    server = _Neo4jServer()
+    monkeypatch.setattr(neo4j.GraphDatabase, "driver", server.driver)
+    return server
+
+
+def test_connect_closes_the_driver_when_neo4j_is_unreachable(neo4j_server):
+    """A driver owns a pool even if it never connected; dropping it on the floor leaked."""
+    from neo4j.exceptions import ServiceUnavailable
+
+    with pytest.raises(ServiceUnavailable):
+        GraphQuery.connect(_UNREACHABLE)
+    assert len(neo4j_server.drivers) == 1
+    assert neo4j_server.leaked == 0, "the driver of a failed connect was left open"
+
+
+def test_a_failing_close_does_not_hide_why_connect_failed(neo4j_server):
+    """The connection error is what becomes advice; a close error must not replace it."""
+    from neo4j.exceptions import ServiceUnavailable
+
+    neo4j_server.close_fails = True
+    with pytest.raises(ServiceUnavailable):
+        GraphQuery.connect(_UNREACHABLE)
+    assert neo4j_server.drivers[0].closed
+
+
+def test_lazy_graph_leaks_no_driver_while_neo4j_is_down(neo4j_server):
+    """LazyGraph dials again after a failure, so a leak per attempt was a leak per call."""
+    clock = Clock()
+    graph = mcp.LazyGraph(_UNREACHABLE, clock=clock)
+    for _ in range(6):
+        with pytest.raises(RuntimeError, match="cannot reach Neo4j"):
+            graph.read_cypher("MATCH (n) RETURN n")
+        clock.advance(mcp.CONNECT_RETRY_COOLDOWN)
+    assert len(neo4j_server.drivers) == 6, "every call past the cooldown should dial"
+    assert neo4j_server.leaked == 0, f"{neo4j_server.leaked} drivers left open"
+
+
+def test_lazy_graph_stops_dialling_a_down_neo4j_for_a_cooldown(neo4j_server):
+    """Two failures in a row mean Neo4j is down: answer from the last one for a while.
+
+    The first retry is immediate, so a blip costs nothing. After that an agent
+    looping over tools gets the same advice back without a connection attempt
+    -- or a connect timeout -- per call, until the cooldown runs out.
+    """
+    clock = Clock()
+    graph = mcp.LazyGraph(_UNREACHABLE, retry_cooldown=5.0, clock=clock)
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="cannot reach Neo4j"):
+            graph.read_cypher("MATCH (n) RETURN n")
+    assert len(neo4j_server.drivers) == 2, "the first retry should dial straight away"
+
+    clock.advance(1.0)
+    for _ in range(3):
+        with pytest.raises(RuntimeError) as failure:
+            graph.read_cypher("MATCH (n) RETURN n")
+    assert len(neo4j_server.drivers) == 2, "a down Neo4j was dialled during the cooldown"
+    message = str(failure.value)
+    assert message.startswith("cannot reach Neo4j at bolt://example.invalid:7687\n"), message
+    assert "docker compose up -d" in message, "the cached answer lost its advice"
+    assert "checking again in 4s" in message, message
+    assert type(failure.value.__cause__).__name__ == "ServiceUnavailable"
+
+
+def test_lazy_graph_recovers_by_itself_once_neo4j_is_back(neo4j_server):
+    clock = Clock()
+    graph = mcp.LazyGraph(_UNREACHABLE, retry_cooldown=5.0, clock=clock)
+    for _ in range(2):
+        with pytest.raises(RuntimeError):
+            graph.read_cypher("MATCH (n) RETURN n")
+
+    neo4j_server.up = True
+    clock.advance(4.0)
+    with pytest.raises(RuntimeError, match="checking again in 1s"):
+        graph.read_cypher("MATCH (n) RETURN n")  # still cooling down
+    clock.advance(1.0)
+    assert graph.read_cypher("MATCH (n) RETURN n") == [{"n": 1}]
+    assert len(neo4j_server.drivers) == 3
+    graph.read_cypher("MATCH (n) RETURN n")
+    assert len(neo4j_server.drivers) == 3, "a live connection is reused, not redialled"
+
+    # A success forgets the outage: the next one starts with a free retry again.
+    graph.close()
+    neo4j_server.up = False
+    for _ in range(2):
+        with pytest.raises(RuntimeError, match="cannot reach Neo4j"):
+            graph.read_cypher("MATCH (n) RETURN n")
+    assert len(neo4j_server.drivers) == 5
+    assert neo4j_server.leaked == 0
+
+
+def test_lazy_graph_never_caches_a_failure_that_is_not_neo4js(neo4j_server):
+    """Only an outage cools down; anything else is a bug and is raised as-is, every time."""
+    neo4j_server.fault = ValueError("a bug, not an outage")
+    graph = mcp.LazyGraph(_UNREACHABLE, clock=Clock())
+    for _ in range(3):
+        with pytest.raises(ValueError, match="a bug, not an outage"):
+            graph.read_cypher("MATCH (n) RETURN n")
+    assert neo4j_server.dials == 3

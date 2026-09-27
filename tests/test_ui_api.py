@@ -1,11 +1,14 @@
 """Dashboard JSON API: routing, input validation, and the server-side write guard.
 
 Everything here runs against the pure `route()` function with a fake graph, so no
-live Neo4j (and, apart from one deliberate loopback smoke test, no socket) is needed.
+live Neo4j (and, apart from a few deliberate loopback tests of the origin and token
+gates, no socket) is needed.
 """
 
 from __future__ import annotations
 
+import contextlib
+import http.client
 import json
 import threading
 import urllib.error
@@ -140,26 +143,24 @@ def test_query_rejects_writes_without_ever_touching_the_graph():
         assert spy.executed == [], f"{cypher!r} reached the database"
 
 
-def test_write_guard_is_enforced_again_inside_graphquery():
-    """Defence in depth: even if the router's pre-check were bypassed, nothing runs."""
+def test_write_guard_is_enforced_again_inside_graphquery(monkeypatch):
+    """Defence in depth: even if the router's pre-check were bypassed, nothing runs.
 
-    def _bypassed(_cypher):  # simulate a front-line check that has been defeated
-        return False
-
+    The patch has to land on ``query_denial``, the name route() actually calls.
+    Patching anything else leaves the front line intact, the request never
+    connects, and the backstop inside GraphQuery.read_cypher goes untested.
+    """
+    monkeypatch.setattr(srv, "query_denial", lambda _cypher: None)  # a defeated front line
     spy = _Spy()
-    original = srv.is_write_query
-    srv.is_write_query = _bypassed
-    try:
-        code, payload = srv.route(
-            "/api/query",
-            "",
-            {"cypher": "MATCH (n) DELETE n"},
-            _settings(),
-            method="POST",
-            connect=spy,
-        )
-    finally:
-        srv.is_write_query = original
+    code, payload = srv.route(
+        "/api/query",
+        "",
+        {"cypher": "MATCH (n) DELETE n"},
+        _settings(),
+        method="POST",
+        connect=spy,
+    )
+    assert spy.connections == 1, "the pre-check still ran, so the backstop was never reached"
     assert code == 400
     assert "read-only" in payload["error"].lower()
     assert spy.executed == []  # GraphQuery.read_cypher raised before running anything
@@ -555,6 +556,279 @@ def test_the_console_says_why_a_query_was_denied():
     assert code == 400
     assert "apoc.load.json" in payload["error"], payload
     assert "not allowlisted" in payload["error"], payload
+
+
+# ------------------------------------------------ origin and token gates ----
+@contextlib.contextmanager
+def _serving(bind_host="127.0.0.1"):
+    """A real dashboard on a kernel-assigned loopback port; yields the port.
+
+    ``bind_host`` is only what the handler is told it was bound to, so a public
+    bind's rules can be exercised without opening a public socket.
+    """
+    from http.server import ThreadingHTTPServer
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), srv._handler(_settings(), bind_host))
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        yield server.server_address[1]
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)
+
+
+def _raw(port, method, path, headers=None, body=None):
+    """Send `path` exactly as written (urllib would tidy it); return (status, payload)."""
+    conn = http.client.HTTPConnection("127.0.0.1", port, timeout=10)
+    try:
+        conn.request(method, path, body=body, headers=headers or {})
+        response = conn.getresponse()
+        text = response.read().decode("utf-8")
+    finally:
+        conn.close()
+    try:
+        return response.status, json.loads(text)
+    except ValueError:
+        return response.status, text
+
+
+class _FakeJobs:
+    """Records whether route() ever handed a request to the ingest runner."""
+
+    def __init__(self):
+        self.started = []
+
+    def start(self, kind, source, name=""):
+        self.started.append((kind, source, name))
+        return self
+
+    def payload(self):
+        return {"id": "fake"}
+
+
+#: Ways to spell the ingest path, sent over the wire byte-for-byte.
+INGEST_SPELLINGS = [
+    "/api/ingest",
+    "/api//ingest",
+    "/api///ingest",
+    "/api/ingest/",
+    "/api//ingest//",
+    "/api/./ingest",
+    "api/ingest",
+    "//api//ingest",
+    "/api//ingest?kind=git",
+]
+
+
+@pytest.mark.parametrize(
+    "path,reaches_ingest",
+    [
+        ("/api/ingest", True),
+        ("/api//ingest", True),
+        ("/api///ingest", True),
+        ("/api/ingest/", True),
+        ("/api//ingest//", True),
+        ("api/ingest", True),
+        ("/api//ingest?kind=git", True),
+        ("http://example.invalid/api//ingest", True),
+        ("/api/./ingest", False),  # a dot segment is literal: an unknown endpoint
+        ("/api/ingest/.", False),
+    ],
+)
+def test_the_token_gate_sees_every_path_the_router_sends_to_ingest(path, reaches_ingest):
+    """The gate and the router read one split of the path, so they cannot disagree.
+
+    The gate used to test ``path.startswith("/api/ingest")`` while route() dropped
+    empty segments, so ``POST /api//ingest`` started an ingest with no token.
+    """
+    jobs = _FakeJobs()
+    srv.route(path, "", {"kind": "git", "source": "."}, _settings(), method="POST", ingest=jobs)
+    assert bool(jobs.started) is reaches_ingest, path
+    assert srv.requires_token(path, "POST"), f"{path!r} needs no token"
+
+
+@pytest.mark.parametrize(
+    "path,method,expected",
+    [
+        ("/api/ingest", "GET", False),  # polling job status changes nothing
+        ("/api/ingest/abc", "get", False),
+        ("/api/query", "POST", False),  # read-only console; must work on a public bind
+        ("/api//query/", "POST", False),
+        ("/api/status", "POST", True),  # fail-closed: not exempt, so guarded
+        ("/api/anything-new", "POST", True),
+        ("/", "POST", False),  # not an API path, never routed
+    ],
+)
+def test_requires_token_is_fail_closed_for_every_non_get(path, method, expected):
+    assert srv.requires_token(path, method) is expected
+
+
+def test_no_spelling_of_the_ingest_path_skips_the_token_over_the_wire():
+    """Regression: ``POST /api//ingest`` used to answer 202 with no token at all."""
+    # An unknown kind: were the gate ever bypassed again, route() rejects the
+    # body, so no real ingest starts on the machine running the tests.
+    body = json.dumps({"kind": "not-a-kind", "source": "."})
+    json_headers = {"Content-Type": "application/json"}
+    with _serving() as port:
+        for path in INGEST_SPELLINGS:
+            code, payload = _raw(port, "POST", path, json_headers, body)
+            assert code == 403, (path, code, payload)
+            assert "X-GF-Token" in payload["error"], path
+        # A wrong token is refused too, and a non-ASCII one is a 403, not a 500:
+        # compare_digest raises on non-ASCII str, so the gate compares bytes.
+        for wrong in ("not-the-token", "töken"):
+            headers = {**json_headers, "X-GF-Token": wrong}
+            code, payload = _raw(port, "POST", "/api/ingest", headers, body)
+            assert code == 403, (wrong, code, payload)
+
+        # A gate, not a wall: the page's own token gets the same odd spelling
+        # through to route(), which then judges the body on its merits.
+        _, html = _raw(port, "GET", "/")
+        token = html.split('<meta name="gf-token" content="', 1)[1].split('"', 1)[0]
+        code, payload = _raw(
+            port, "POST", "/api//ingest", {**json_headers, "X-GF-Token": token}, body
+        )
+        assert code == 400 and "kind" in payload["error"], payload
+
+
+@pytest.mark.parametrize(
+    "origin,host,expected",
+    [
+        ("http://127.0.0.1:8000", "127.0.0.1:8000", True),
+        ("http://localhost:8000", "localhost:8000", True),
+        ("http://LOCALHOST:8000", "localhost:8000", True),
+        ("http://127.0.0.1", "127.0.0.1", True),
+        ("http://127.0.0.1:80", "127.0.0.1", True),  # the default port, spelt out
+        ("http://127.0.0.1", "127.0.0.1:80", True),
+        ("http://[::1]:8000", "[::1]:8000", True),
+        ("http://[::1]", "[::1]:80", True),
+        ("http://[0:0:0:0:0:0:0:1]:8000", "[::1]:8000", True),
+        # another port on the same host is another origin, however local
+        ("http://127.0.0.1:9999", "127.0.0.1:8000", False),
+        ("http://localhost:3000", "localhost:8000", False),
+        ("http://[::1]:9999", "[::1]:8000", False),
+        ("http://127.0.0.1:8000", "127.0.0.1", False),
+        ("http://127.0.0.1", "127.0.0.1:8000", False),
+        # another scheme: this server has no TLS, so an https page is never it
+        ("https://127.0.0.1:8000", "127.0.0.1:8000", False),
+        ("https://127.0.0.1", "127.0.0.1:443", False),
+        ("ftp://127.0.0.1:8000", "127.0.0.1:8000", False),
+        # another host
+        ("http://localhost:8000", "127.0.0.1:8000", False),
+        ("http://evil.example:8000", "127.0.0.1:8000", False),
+        # not an origin at all
+        ("null", "127.0.0.1:8000", False),
+        ("", "127.0.0.1:8000", False),
+        ("127.0.0.1:8000", "127.0.0.1:8000", False),
+        ("http://127.0.0.1:8000/", "127.0.0.1:8000", False),
+        ("http://user@127.0.0.1:8000", "127.0.0.1:8000", False),
+        ("http://127.0.0.1:8000", "", False),
+        ("http://127.0.0.1:abc", "127.0.0.1:abc", False),
+        ("http://[::1", "[::1", False),
+    ],
+)
+def test_same_origin_compares_scheme_host_and_port(origin, host, expected):
+    assert srv.is_same_origin(origin, host) is expected
+
+
+@pytest.mark.parametrize(
+    "origin,host,expected",
+    [
+        # a TLS-terminating proxy forwards the Host the browser sent it
+        ("https://graph.example.com", "graph.example.com", True),
+        ("https://graph.example.com", "graph.example.com:443", True),
+        ("https://graph.example.com:8443", "graph.example.com:8443", True),
+        ("https://[::1]:8443", "[0:0:0:0:0:0:0:1]:8443", True),
+        # plain http is judged exactly as on loopback
+        ("http://graph.example.com", "graph.example.com", True),
+        ("http://graph.example.com:8000", "graph.example.com:8000", True),
+        ("http://graph.example.com", "graph.example.com:443", False),
+        ("http://localhost:3000", "localhost:8000", False),
+        # host and port must still agree
+        ("https://evil.example", "graph.example.com", False),
+        ("https://graph.example.com:8443", "graph.example.com", False),
+        ("https://graph.example.com", "graph.example.com:8000", False),
+        ("https://graph.example.com", "graph.example.com:80", False),
+        ("ftp://graph.example.com", "graph.example.com", False),
+        ("null", "graph.example.com", False),
+        ("https://user@graph.example.com", "graph.example.com", False),
+    ],
+)
+def test_a_public_bind_accepts_its_tls_proxy_origin(origin, host, expected):
+    """Regression: behind a TLS proxy every console POST was refused as cross-origin.
+
+    The Origin is https (port 443) while the forwarded Host was read as http
+    (port 80). Only the scheme is inferred; host and port are compared as ever.
+    """
+    assert srv.is_same_origin(origin, host, tls_front_end=True) is expected
+
+
+@pytest.mark.parametrize(
+    "origin,host",
+    [
+        ("https://localhost", "localhost"),
+        ("https://127.0.0.1", "127.0.0.1:443"),
+        ("https://graph.example.com", "graph.example.com"),
+    ],
+)
+def test_without_a_tls_front_end_an_https_origin_is_never_this_server(origin, host):
+    """On loopback an https page on the same host is another local server."""
+    assert srv.is_same_origin(origin, host) is False
+
+
+def test_a_page_on_another_local_port_is_refused_over_the_wire():
+    """Regression: only hostnames were compared, so any localhost dev server passed."""
+    body = json.dumps({"cypher": "MATCH (n) DELETE n"})  # route() refuses it if reached
+    with _serving() as port:
+        other = port + 1 if port < 65535 else port - 1
+        for origin in (
+            f"http://127.0.0.1:{other}",
+            "http://127.0.0.1",
+            f"https://127.0.0.1:{port}",
+            f"http://localhost:{port}",
+        ):
+            code, payload = _raw(
+                port, "POST", "/api/query", {"Origin": origin, "Content-Type": "text/plain"}, body
+            )
+            assert code == 403, origin
+            assert "cross-origin" in payload["error"], origin
+
+        # The page's own origin, and no Origin at all, still reach route(), which
+        # then refuses the write on its own terms.
+        for headers in ({"Origin": f"http://127.0.0.1:{port}"}, {}):
+            code, payload = _raw(
+                port, "POST", "/api/query", {"Content-Type": "text/plain", **headers}, body
+            )
+            assert code == 400 and "read-only" in payload["error"], headers
+
+
+def test_the_console_works_behind_a_tls_proxy_on_a_public_bind():
+    """Regression: an https Origin with a forwarded Host was a 403 on every POST."""
+    body = json.dumps({"cypher": "MATCH (n) DELETE n"})  # route() refuses it if reached
+
+    def post(port, origin, host):
+        headers = {"Origin": origin, "Host": host, "Content-Type": "text/plain"}
+        return _raw(port, "POST", "/api/query", headers, body)
+
+    with _serving("0.0.0.0") as port:
+        # Reaching route() is the point: it then refuses the write on its own terms.
+        for host in ("graph.example.com", "graph.example.com:443"):
+            code, payload = post(port, "https://graph.example.com", host)
+            assert code == 400 and "read-only" in payload["error"], (host, code, payload)
+        for origin in (
+            "https://evil.example",
+            "https://graph.example.com:8443",
+            "http://graph.example.com:3000",
+        ):
+            code, payload = post(port, origin, "graph.example.com")
+            assert code == 403 and "cross-origin" in payload["error"], (origin, code, payload)
+
+    # A loopback bind has no proxy to allow for: an https page is another server.
+    with _serving() as port:
+        code, payload = post(port, "https://localhost", "localhost")
+        assert code == 403 and "cross-origin" in payload["error"], (code, payload)
 
 
 # ------------------------------------------------- one loopback smoke test --
