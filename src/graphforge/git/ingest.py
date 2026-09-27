@@ -16,7 +16,7 @@ from ..core.cypher import NodeRef, Operation, lit, merge_node, merge_rel, set_la
 from ..core.neo4j_writer import Neo4jWriter, load_schema
 from . import history as history_mod
 from . import scan as scan_mod
-from .clone import GitHandler
+from .clone import GitHandler, strip_credentials
 
 log = logging.getLogger("graphforge.git.ingest")
 
@@ -104,7 +104,8 @@ class GitIngestor:
         stats = {"repos": 0, "files": 0, "commits": 0}
         failures = []
         for spec in _progress(repo_specs, desc="repos", unit="repo"):
-            name = spec.get("name") or spec.get("url") or spec.get("path") or "?"
+            url = strip_credentials(spec.get("url") or "")
+            name = spec.get("name") or url or spec.get("path") or "?"
             try:
                 s = self.ingest_repo(
                     spec, include_lines, with_structure, with_history, replace, since_commit
@@ -165,7 +166,9 @@ class GitIngestor:
                     {"id": _repo_id(repo)},
                     {
                         "name": repo,
-                        "url": spec.get("url", ""),
+                        # Never the raw spec URL: it may carry `user:secret@`, and
+                        # this property is shown in the dashboard's label explorer.
+                        "url": strip_credentials(spec.get("url") or ""),
                         "path": path,
                         "defaultBranch": spec.get("branch") or self.gs.default_branch,
                         "status": "ingesting",
@@ -342,7 +345,7 @@ class GitIngestor:
         # Files (+ classes, methods, imports, optional lines), flushed per file so
         # a long ingest is incremental. One bar over the loop, not one per write:
         # a 5,000-file repository used to print 5,000 separate progress bars.
-        for f in tqdm(files, desc=f"{repo}: files", unit="file"):
+        for f in _progress(files, desc=f"{repo}: files", unit="file"):
             self.writer.write(
                 self._file_ops(repo, f, module_name_by_key, include_lines),
                 progress=False,

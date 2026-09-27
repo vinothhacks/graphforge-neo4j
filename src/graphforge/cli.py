@@ -453,7 +453,7 @@ def cmd_mcp_install(args) -> int:
 
     clients = [args.client] if args.client else None
     if args.remove:
-        lines = uninstall(clients)
+        lines = uninstall(clients, dry_run=args.dry_run)
     else:
         env_file = Path(args.env).resolve() if args.env else _default_env_file()
         lines = install(clients, env_file, dry_run=args.dry_run)
@@ -678,7 +678,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--remove", action="store_true", help="remove the entry instead of adding it"
     )
     p_mcp_install.add_argument(
-        "--dry-run", action="store_true", help="print what would be written and exit"
+        "--dry-run",
+        action="store_true",
+        help="print what would be written (or, with --remove, removed) and change nothing",
     )
     _add_common(p_mcp_install)
     p_mcp_install.set_defaults(func=cmd_mcp_install)

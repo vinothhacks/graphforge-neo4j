@@ -45,6 +45,8 @@ repos:
       - id: check-toml
       - id: check-added-large-files
         args: [--maxkb=512]
+        # The rendered showcase video and images are committed on purpose (29a293f).
+        exclude: '^docs/showcase/[^/]+\.(mp4|png)$'
       - id: detect-private-key
       - id: check-merge-conflict
       - id: check-executables-have-shebangs

@@ -29,7 +29,7 @@ checklist.
 | `rebound-host-rejected` | `GET /api/status` with `Host: evil.example` against a loopback bind | HTTP 403 `unexpected Host header` | `PASS` |
 | `ingest-requires-token` | `POST /api/ingest` with no `X-GF-Token`, then with a wrong one | HTTP 403 both times, `missing or invalid X-GF-Token` | `PASS` |
 | `ingest-absent-when-public` | Handler built with a non-loopback bind | `<meta name="gf-token">` absent from the page; ingest endpoints 403 | `PASS` |
-| `password-never-served` | `document.body.innerHTML` scanned after a database ingest | Neither the Neo4j nor the Postgres password present. Job log shows `postgresql://graphforge:***@127.0.0.1:55433/shopdb` | `PASS` |
+| `password-never-served` | `document.body.innerHTML` scanned after a database ingest | Neither the Neo4j nor the Postgres password present. Job log shows `postgresql://***@127.0.0.1:55433/shopdb`: the whole userinfo is hidden, username included, because for `https://TOKEN@host` the username is the credential | `PASS` |
 | `first-run-empty-state` | Dashboard opened against an empty graph | `#firstrun` visible; graph, labels, relationship and console cards hidden; tiles read `0`. Captured as `docs/img/dashboard-empty.png` | `PASS` |
 | `ingest-from-the-page` | Clicked **Add a repository**, filled the form, clicked **Start** | Job ran to completion: `1 repositories, 97 files, 19 commits`. Banner `Loaded …`. Tiles went `0` → `1,193` nodes and the first-run panel hid itself | `PASS` |
 | `ingest-refreshes-counts` | Tiles read immediately after a job finished | Counts updated in the same tick — the TTL-cached schema snapshot is invalidated on success, so the numbers do not lag a minute behind an ingest the user just watched | `PASS` |

@@ -13,6 +13,7 @@ import types
 
 import pytest
 
+from graphforge.core.errors import MissingExtra
 from graphforge.git import discover
 
 
@@ -120,7 +121,11 @@ def test_a_project_without_a_default_branch_falls_back(fake_requests):
 
 
 def test_a_missing_requests_says_which_extra_to_install(monkeypatch):
-    """requests is an extra as of 0.3; discovery is the only thing that needs it."""
+    """requests is an extra as of 0.3; discovery is the only thing that needs it.
+
+    It must be MissingExtra, not a bare RuntimeError: that is the type callers
+    tell a missing install apart from a per-item failure by, as the DB drivers do.
+    """
     monkeypatch.setitem(sys.modules, "requests", None)
     import builtins
 
@@ -132,5 +137,5 @@ def test_a_missing_requests_says_which_extra_to_install(monkeypatch):
         return real_import(name, *args, **kwargs)
 
     monkeypatch.setattr(builtins, "__import__", fake_import)
-    with pytest.raises(RuntimeError, match=r"graphforge-neo4j\[gitlab\]"):
+    with pytest.raises(MissingExtra, match=r"graphforge-neo4j\[gitlab\]"):
         discover.gitlab_group_repos("https://gitlab.example", "42")
