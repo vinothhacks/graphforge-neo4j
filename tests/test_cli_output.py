@@ -89,6 +89,33 @@ def test_verbose_is_documented():
     assert described.get("--verbose")
 
 
+# -------------------------------------------------------------- mcp install --
+def test_mcp_install_remove_honours_dry_run(tmp_path, monkeypatch, capsys):
+    """`--remove` was checked before `--dry-run` and uninstall had no dry run at
+    all, so `graphforge mcp install --remove --dry-run` really deleted entries."""
+    import json
+
+    from graphforge.cli import main
+
+    target = tmp_path / ".mcp.json"
+    target.write_text(
+        json.dumps({"mcpServers": {"graphforge": {"command": "g"}, "other": {"command": "k"}}}),
+        encoding="utf-8",
+    )
+    before = target.read_bytes()
+    monkeypatch.chdir(tmp_path)
+
+    code = main(["mcp", "install", "--client", "claude-code", "--remove", "--dry-run"])
+    assert code == 0
+    assert target.read_bytes() == before, "--dry-run removed the entry anyway"
+    assert "would be removed" in capsys.readouterr().out
+
+    main(["mcp", "install", "--client", "claude-code", "--remove"])
+    assert json.loads(target.read_text(encoding="utf-8"))["mcpServers"] == {
+        "other": {"command": "k"}
+    }
+
+
 # ------------------------------------------------------------------ version --
 def test_the_version_fallback_cannot_be_mistaken_for_a_release():
     """A hardcoded release number drifts: it said 0.1.0 while pyproject said 0.2.0."""
@@ -120,7 +147,7 @@ def test_a_missing_driver_names_an_extra_that_exists(engine, module, extra, monk
     import builtins
     from pathlib import Path
 
-    import tomllib
+    tomllib = pytest.importorskip("tomllib")  # stdlib from 3.11; CI also runs 3.10
 
     from graphforge.db import get_extractor
 
@@ -193,7 +220,7 @@ def test_all_extra_restores_every_optional_dependency():
     """`[all]` is the documented one-line way back to the pre-0.3 install."""
     from pathlib import Path
 
-    import tomllib
+    tomllib = pytest.importorskip("tomllib")  # stdlib from 3.11; CI also runs 3.10
 
     pyproject = tomllib.loads(
         (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
