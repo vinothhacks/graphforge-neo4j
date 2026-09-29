@@ -49,6 +49,10 @@ mssql = ["pyodbc>=5.0"]
 # GitLab group auto-discovery is the only thing that needs an HTTP client.
 gitlab = ["requests>=2.28.0"]
 dev = [
+    # The suite builds the REAL MCP server (tests/test_mcp_tools.py) rather than
+    # a stub, so the extra is a test dependency. Without it every CI job that
+    # installs `.[dev]` failed those tests with MissingExtra.
+    "mcp>=2",
     "pytest>=7.4",
     "pytest-cov>=4.1",
     "ruff>=0.5",

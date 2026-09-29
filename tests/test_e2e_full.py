@@ -225,12 +225,12 @@ def test_mcp_stdio_tools_pagination_and_caveat():
                     result = await session.call_tool(name, {"path": "Hello.py"})
                 else:
                     result = await session.call_tool(name, {})
-                assert result.isError is not True, (name, _tool_text(result))
+                assert result.is_error is not True, (name, _tool_text(result))
 
             for cypher in MUST_REJECT:
                 denied = await session.call_tool("read_cypher", {"query": cypher})
                 blob = _tool_text(denied).lower()
-                assert denied.isError or "read-only" in blob, cypher
+                assert denied.is_error or "read-only" in blob, cypher
 
             dead = await session.call_tool(
                 "find_dead_code", {"repo": "e2e-inc", "days": 1, "limit": 5}
@@ -242,9 +242,9 @@ def test_mcp_stdio_tools_pagination_and_caveat():
             second = _tool_json(await session.call_tool("get_schema", {}))
             assert first == second
             refreshed = await session.call_tool("get_schema", {"refresh": True})
-            assert refreshed.isError is not True
+            assert refreshed.is_error is not True
             bypass = await session.call_tool("get_schema", {"ttl": 0})
-            assert bypass.isError is not True
+            assert bypass.is_error is not True
 
             await _walk_pages(
                 session, "search_nodes", {"label": "File", "prop": "name", "value": "a"}

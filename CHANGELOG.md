@@ -188,6 +188,12 @@ All notable changes to this project are documented here. The format is based on
   column width — which is most real file paths.
 - `graphforge --version` reported a hardcoded `0.1.0` that had drifted from
   `pyproject.toml`.
+- CI had been red since the extras became optional. The `dev` extra now
+  includes `mcp`, because the suite builds the real MCP server rather than a
+  stub, so `pip install -e ".[dev]"` followed by `pytest` passes again. The
+  playground e2e job and the integration job install the `postgres` extra they
+  ingest with. The MCP stdio e2e test read `CallToolResult.isError`, which mcp
+  2.x renamed to `is_error`.
 
 ### Added
 
