@@ -376,7 +376,7 @@ Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.jso
 | Tool | Arguments | Purpose |
 |------|-----------|---------|
 | `get_schema` | `ttl`, `refresh` | Labels, relationship types, node counts per label. Cached for 60s by default; `refresh=true` forces a fresh read, `ttl=0` bypasses the cache. |
-| `read_cypher` | `query`, `limit` | Run a **read-only** Cypher query. Writes, `LOAD CSV`, `USE`, `SHOW`, multi-statement, and unknown procedures are rejected. Allowed procedures: `db.labels`, `db.relationshipTypes`, `db.propertyKeys`. |
+| `read_cypher` | `query`, `limit` | Run a **read-only** Cypher query. Writes, `LOAD CSV`, `USE`, `SHOW` and the other administration commands, multi-statement, unknown procedures, and namespaced plugin functions (`apoc.*`, `gds.*`) are rejected. Allowed procedures: `db.labels`, `db.relationshipTypes`, `db.propertyKeys`; Neo4j's own `date.*` / `duration.*` / `point.*`-style functions still run. |
 | `search_nodes` | `label`, `prop`, `value`, `limit`, `offset` | Substring search on a property of a label. **Paged.** |
 | `node_neighbors` | `node_id`, `limit` | The immediate neighbourhood of a node `id`. |
 | `search_codebase` | `text`, `kind`, `repo`, `limit`, `offset` | Case-insensitive code and/or schema search. `kind` is `code` / `schema` / `all`. Optional `repo`. **Paged.** |
@@ -414,7 +414,7 @@ A **zero-dependency** local page — Python's stdlib HTTP server, one hand-writt
 
 Behind it are seven read-only JSON endpoints: `GET /api/status`, `/api/schema`, `/api/graph/sample`, `/api/search`, `/api/labels/<label>/sample`, `/api/node/<id>/neighbors`, and `POST /api/query`. Every one validates its input *before* opening a connection, so a rejected request provably never reaches the database.
 
-**How "Add data" is gated.** The page has no authentication, so the browser is the only thing between it and any site you have open. The ingest endpoints therefore do not exist unless the server is bound to loopback, and every request to them must carry a per-run token that is served inside the page — which a cross-origin script cannot read. A foreign `Origin`, or a `Host` that is not loopback, is refused outright. Run `graphforge ui --host 0.0.0.0` and ingest is simply not there, and the command says so.
+**How "Add data" is gated.** The page has no authentication, so the browser is the only thing between it and any site you have open. The ingest endpoints therefore do not exist unless the server is bound to loopback, and every request that starts an ingest (any non-GET request to them) must carry a per-run token that is served inside the page — which a cross-origin script cannot read. A foreign `Origin`, or a `Host` that is not loopback, is refused outright. Run `graphforge ui --host 0.0.0.0` and ingest is simply not there.
 
 ### Screenshots
 

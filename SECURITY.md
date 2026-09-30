@@ -15,10 +15,14 @@ is more useful than a long one.
 
 **The graph is read-only over MCP and over the web console.** `graphforge.query_guard`
 is the single implementation behind both `read_cypher` and `POST /api/query`. It
-masks strings, comments and quoted identifiers, then refuses write clauses,
-`LOAD CSV`, `USE`, `SHOW`, multi-statement queries, and any `LIMIT` above 500.
-Procedures are deny-by-default against a three-entry allowlist, and a `CALL`
-whose target cannot be resolved is refused rather than passed through. The query
+splits the query with a lexer that follows Neo4j's own quoting rules, so strings,
+comments and quoted identifiers are data. It then refuses write clauses,
+`LOAD CSV`, `USE` and administration commands wherever a clause can begin,
+multi-statement queries, and any `LIMIT` above 500. An unterminated literal is
+refused, not guessed at. Procedures are deny-by-default against a three-entry
+allowlist, and a `CALL` whose target cannot be resolved is refused rather than
+passed through. Namespaced functions are refused unless the namespace is one of
+Neo4j's own, because APOC ships functions that run nested Cypher. The query
 then runs inside a Neo4j read transaction with a timeout, so a defeated guard
 still cannot write. See [ADR 9](docs/DESIGN.md) for why it is built this way and
 what the first version got wrong.
@@ -33,7 +37,12 @@ thing between it and any page you have open, so:
 - Anything that can change the graph must carry a per-run token served inside the
   page, which a cross-origin script cannot read.
 - A foreign `Origin` is refused (a cross-origin `fetch` with
-  `Content-Type: text/plain` is a *simple* request and gets no preflight).
+  `Content-Type: text/plain` is a *simple* request and gets no preflight). On a
+  loopback bind that means any other scheme, host *or port*: a page on another
+  localhost port is a different origin. A public bind may sit behind a reverse
+  proxy that terminates TLS, so there an `https` `Origin` whose host and port
+  match the `Host` header (no port meaning 443) is accepted too; any other
+  mismatch is refused.
 - A loopback-bound server refuses any `Host` that is not loopback, which is what
   stops DNS rebinding.
 
@@ -45,7 +54,10 @@ hostnames — and disables ingest entirely. The command warns when you do it.
 masked in every dashboard payload and scrubbed from ingest job logs before they
 reach the page. Git credentials go to the `git` subprocess through a short-lived
 credential-helper file rather than in the remote URL or in argv, and git's own
-output is scrubbed before it is logged or raised.
+output is scrubbed before it is logged or raised. That holds for credentials
+written into the repository URL too (`https://user:secret@host/…`,
+`https://TOKEN@host/…`). Only the bare URL reaches git, `.git/config` or the
+graph's `:Repository.url`.
 
 ## What is out of scope
 

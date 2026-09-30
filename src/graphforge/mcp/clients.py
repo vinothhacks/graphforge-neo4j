@@ -8,9 +8,12 @@ differs is the path.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
+import stat
 import sys
+import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -18,6 +21,15 @@ from pathlib import Path
 SERVERS_KEY = "mcpServers"
 #: The name graphforge registers itself as.
 SERVER_NAME = "graphforge"
+
+
+class ClientConfigError(ValueError):
+    """A client config exists but could not be read or understood.
+
+    Such a file must never be rewritten: whatever graphforge failed to parse is
+    the user's other servers and settings, and writing a merge over it would
+    erase them.
+    """
 
 
 @dataclass(frozen=True)
@@ -32,16 +44,91 @@ class McpClient:
     project_scoped: bool = False
 
     def read(self) -> dict:
-        """The client's current config, or ``{}`` when it has none yet."""
+        """The client's current config, or ``{}`` when it has none yet.
+
+        Only a missing (or empty) file means "no config". Anything else that
+        stops the file being understood raises :class:`ClientConfigError`
+        rather than reading as ``{}``: this used to swallow every error, and
+        ``install`` then wrote its merge over the file, erasing every other
+        server in it. ``utf-8-sig`` is not optional either -- Notepad and
+        PowerShell 5.1's ``Out-File`` both write a BOM, which plain ``utf-8``
+        rejects.
+        """
         try:
-            return json.loads(self.path.read_text(encoding="utf-8")) or {}
-        except (OSError, ValueError):
+            text = self.path.read_text(encoding="utf-8-sig")
+        except FileNotFoundError:
             return {}
+        except OSError as exc:
+            raise ClientConfigError(f"cannot read {self.path}: {exc}") from exc
+        except ValueError as exc:  # UnicodeDecodeError: not text at all
+            raise ClientConfigError(f"cannot parse {self.path}: {exc}") from exc
+        if not text.strip():
+            return {}
+        try:
+            config = json.loads(text)
+        except ValueError as exc:
+            raise ClientConfigError(f"cannot parse {self.path}: {exc}") from exc
+        if not isinstance(config, dict):
+            raise ClientConfigError(
+                f"cannot parse {self.path}: expected a JSON object, found {type(config).__name__}"
+            )
+        servers = config.get(SERVERS_KEY)
+        if servers is not None and not isinstance(servers, dict):
+            raise ClientConfigError(
+                f"cannot parse {self.path}: {SERVERS_KEY!r} should be an object, "
+                f"found {type(servers).__name__}"
+            )
+        return config
+
+    def write(self, config: dict) -> None:
+        """Replace the config in one step, so a failure mid-write cannot truncate it.
+
+        The JSON goes to a temporary file beside the real one, which is then
+        renamed over it. ``os.replace`` is atomic within a filesystem, so the
+        client sees either the old file or the new one, never half of either.
+        A symlinked config is written through to its target rather than
+        replaced by a regular file.
+        """
+        target = self.path.resolve()
+        target.parent.mkdir(parents=True, exist_ok=True)
+        text = json.dumps(config, indent=2) + "\n"
+        fd, tmp = tempfile.mkstemp(prefix=f".{target.name}.", suffix=".tmp", dir=target.parent)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                fh.write(text)
+                fh.flush()
+                os.fsync(fh.fileno())
+            # mkstemp creates the file 0600. Keep the permissions the user had, and
+            # give a new config the mode a plain open() would: 0666 less the umask.
+            # Skipped on Windows, where the only bit is read-only, and copying it
+            # would stop the temporary file being cleaned up if the rename fails.
+            if os.name != "nt":
+                if target.exists():
+                    mode = stat.S_IMODE(target.stat().st_mode)
+                else:
+                    umask = os.umask(0)
+                    os.umask(umask)
+                    mode = 0o666 & ~umask
+                os.chmod(tmp, mode)
+            try:
+                os.replace(tmp, target)
+            except PermissionError:
+                # Windows refuses to replace a file another process holds open
+                # without FILE_SHARE_DELETE; an in-place write still gets through,
+                # as it always did before. Only that case gives up atomicity.
+                if os.name != "nt" or not target.exists():
+                    raise
+                target.write_text(text, encoding="utf-8")
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp)
+            raise
 
     def servers(self) -> dict:
-        config = self.read()
-        servers = config.get(SERVERS_KEY)
-        return servers if isinstance(servers, dict) else {}
+        """The client's registered servers. Raises :class:`ClientConfigError`."""
+        return self.read().get(SERVERS_KEY) or {}
 
     def has_graphforge(self) -> bool:
         return SERVER_NAME in self.servers()

@@ -28,6 +28,43 @@ All notable changes to this project are documented here. The format is based on
   'graphforge[mssql]'` it used to print — an extra that never existed, on a
   distribution that is not called that.
 
+- **The `mcp` extra now requires `mcp` 2.x.** 0.2.0 asked for `mcp>=1.2.0`. The
+  server is now built on the 2.x `MCPServer` API, so on 1.x `graphforge mcp`
+  stops with an error naming the upgrade instead of serving. Upgrading
+  `graphforge-neo4j` on its own leaves an installed `mcp` 1.x in place; upgrade
+  through the extra:
+
+  ```bash
+  pip install -U "graphforge-neo4j[mcp]"
+  ```
+
+- **`read_cypher` and the dashboard console refuse much of what 0.2.0 ran.**
+  0.2.0 checked a query against one regular expression for write keywords, and
+  capped rows only by appending a `LIMIT` when it found none. Now:
+
+  - Only `db.labels`, `db.relationshipTypes` and `db.propertyKeys` can be
+    `CALL`ed. Every other procedure is refused, Neo4j's own included:
+    `db.schema.visualization`, `db.indexes` and `dbms.components` no longer run.
+  - `USE`, `LOAD CSV` and more than one statement are refused, and
+    `read_cypher` refuses a query over 8,000 characters, as the console already
+    did.
+  - A `LIMIT` above 500 is an error, and so is a `read_cypher` `limit` above 500
+    (the console still clamps its own `limit` to 500).
+  - At most `limit` rows come back (200 by default), even when the query's own
+    `LIMIT` is larger: `MATCH (n) RETURN n LIMIT 400` returns 200 rows.
+  - A namespaced function call — `apoc.text.join(…)`, anything under `gds.*`,
+    any user-defined namespace — is refused, and so are `SHOW`, `TERMINATE`,
+    `ALTER`, `GRANT`, `DENY`, `REVOKE`, `START`, `STOP` and the other
+    administration commands. Neo4j's own function namespaces (`date.*`,
+    `datetime.*`, `localdatetime.*`, `localtime.*`, `time.*`, `duration.*`,
+    `point.*`, `vector.similarity.*`) and un-namespaced built-ins such as
+    `count` and `toLower` still run.
+  - The query runs with a 30-second transaction timeout.
+
+  A query that used APOC, or any procedure but those three, in 0.2.0 no longer
+  runs through graphforge at all: run it in Neo4j Browser or `cypher-shell`,
+  which the guard does not sit in front of. The reasons are under Security.
+
 ### Security
 
 - **Read guard: closed a bypass.** A backtick-quoted procedure name
@@ -36,14 +73,87 @@ All notable changes to this project are documented here. The format is based on
   never consulted. The allowlist now applies to every `CALL` site: a target that
   cannot be resolved is a denial. Quoted identifiers are masked, which also fixes
   the mirror-image false positive that rejected ``MATCH (n:`Pending DELETE`)``.
+- **Read guard: every check now runs on one lexer that follows Neo4j's rules.**
+  The masker disagreed with Neo4j about where a literal ended: it read `''` as an
+  escaped quote, ignored backslash escapes, and ended a `//` comment only at a
+  line feed. So a string with a backslash-escaped quote, or a comment ended by a
+  carriage return, could hide a following `CALL` or write clause from every
+  check. An unterminated literal, or a character Cypher has no use for, is now a
+  denial. `USE` and administration commands are refused wherever a clause can
+  begin — past `EXPLAIN` / `PROFILE` / `CYPHER …`, after `UNION`, at the top of a
+  subquery — not only at the start of the query, so `CALL { USE other … }` can no
+  longer switch database.
+- **Read guard: namespaced functions are refused.** The allowlist covered
+  procedures only, and APOC also ships functions that run nested Cypher
+  (`apoc.cypher.runFirstColumn*`), so a function call could reach what `CALL`
+  could not. Neo4j never loads a user-defined function into the root namespace,
+  so a namespaced call outside Neo4j's own namespaces is plugin code. This is a
+  behaviour change; see Changed — BREAKING.
 - **Dashboard: drive-by CSRF and DNS rebinding.** A cross-origin `fetch` with
   `Content-Type: text/plain` is a simple request and is sent with no preflight, so
-  any page you had open could reach the console. A foreign `Origin` is now
-  refused, and a loopback-bound server refuses any `Host` that is not loopback.
+  any page you had open could reach the console. An `Origin` that differs in
+  scheme, host *or port* is now refused. Comparing hosts alone would let a page
+  on any other localhost port, a dev server say, pass as the dashboard. The one
+  exception is a public (non-loopback) bind, which may sit behind a reverse
+  proxy that terminates TLS: there an `https` `Origin` whose host and port match
+  the `Host` header (no port meaning 443) is accepted too. A loopback-bound
+  server refuses every scheme, host or port mismatch, and any `Host` that is not
+  loopback. Every non-GET API request except the read-only console needs the
+  per-run token, decided on the same path segments the router dispatches on, so
+  a spelling such as `/api//ingest` cannot skip the check.
 - **Git credentials no longer travel in argv or the remote URL**, where they
   reached `ps`, `.git/config`, and the git error text that `GitError` carried up
   to the console. They go through a short-lived credential-helper file, and git
-  output is scrubbed before it is logged or raised.
+  output is scrubbed before it is logged or raised. That includes credentials
+  written into the URL itself (`https://user:secret@host/r.git`,
+  `https://TOKEN@host/r.git`), which 0.2.0 passed to git verbatim: they are split
+  off and sent the same way. A URL that names only a user
+  (`https://alice@host/…`) asks your own credential manager for that user. Your
+  own helpers are only ever asked, through `git credential fill`: the clone,
+  fetch or pull is given the temporary file alone, so git never saves what
+  graphforge sends into your credential store. The file also answers for hosts
+  where `credential.useHttpPath` is on, which Git for Windows turns on for
+  `https://dev.azure.com`. The dashboard's job log hides a URL's whole userinfo
+  (`https://***@host/…`), not just the password, since for `https://TOKEN@host`
+  the username is the token.
+- **`:Repository.url` no longer stores credentials.** 0.2.0 saved the URL exactly
+  as given, `user:secret@` included, and the dashboard's label explorer shows
+  that property. Only the bare URL is stored now, and it is also what logs and
+  failure summaries name. **If you ever ingested a URL with credentials in it,
+  run `graphforge git` on that repository again** to overwrite the stored value.
+  `MATCH (r:Repository) WHERE r.url CONTAINS '@' RETURN r.name, r.url` lists the
+  candidates (an `ssh://git@…` URL matches too, harmlessly).
+- **A credential 0.2.0 stored in a clone's origin URL is removed when nothing is
+  lost.** A clone that 0.2.0 made with `GIT_TOKEN` or `GIT_USERNAME` /
+  `GIT_PASSWORD` set holds that credential in the origin URL in its
+  `.git/config`, and so does one it made with neither set from a URL with
+  credentials in it, which git saves as given. On each update graphforge
+  compares the stored credential with the login this run uses: the one in the
+  repository URL you pass, if that URL carries one for the same scheme and host,
+  and otherwise the settings' (`oauth2:<GIT_TOKEN>` if a token is set, else
+  `GIT_USERNAME`, with `GIT_PASSWORD` if set). A user with no password, stored
+  or passed, is paired with `GIT_PASSWORD` when it is `GIT_USERNAME`, and with
+  `GIT_TOKEN` when it is `oauth2`. The stored credential is removed, with
+  `git remote set-url origin <bare URL>` and the log line "Removed the
+  credentials stored in …'s origin URL", only when it is exactly that login,
+  user and password alike, or when it names a user with no password and the run
+  logs in as that user. So a clone made with the settings is cleaned up by a
+  plain URL as long as the settings still hold the credential it stored, and one
+  made from a URL with credentials in it by passing that URL again.
+
+  In every other case the origin is left as it is, since nothing has shown that
+  the new login works and the stored one may be its only copy, and a warning is
+  logged: another user in the URL, with or without a password; the same user
+  with a different or mistyped password; a rotated `GIT_TOKEN` or
+  `GIT_PASSWORD`; a URL for another host; nothing in the URL or the settings.
+  For the same user with another secret, the warning says the stored
+  credentials differ from the password in the repository URL (when the URL
+  carries one for that host), from `GIT_PASSWORD`, or from `GIT_TOKEN`,
+  whichever this run brings, that git sends the stored ones instead, and which
+  `git remote set-url` command switches to the new ones. Otherwise it says to
+  move the credential into `GIT_TOKEN`, or `GIT_USERNAME` and `GIT_PASSWORD`,
+  and then run that command. Only a credential written in `.git/config` counts:
+  one that your own `insteadOf` rule adds is never touched or reported.
 - `docker-compose.yml` no longer sets `apoc.*` unrestricted. graphforge needs no
   APOC at all, and unrestricted grants `apoc.load.jdbc` / `apoc.load.json` —
   outbound network and filesystem access — to anything that reaches the server.
@@ -53,31 +163,61 @@ All notable changes to this project are documented here. The format is based on
 - `read_cypher` corrupted multi-line Cypher. An existing `LIMIT` was detected by
   searching the raw text for `" LIMIT "`, so a newline-formatted query looked
   uncapped and got a second clause appended — `LIMIT 3\nLIMIT 200`, a syntax
-  error, on the shape an agent actually writes. A `" LIMIT "` inside a string
-  literal also suppressed the cap, and a standalone `CALL` was never capped.
+  error, on the shape an agent actually writes. A standalone `CALL`, which takes
+  no `LIMIT` clause, got one appended too. A `" LIMIT "` inside a string literal
+  suppressed the cap, and so did a `LIMIT` inside a `CALL { }`, `EXISTS { }`,
+  `COUNT { }` or `COLLECT { }` subquery, which caps nothing the outer query
+  returns: only a `LIMIT` after the final top-level `RETURN` counts now. That
+  appended clause was the only cap 0.2.0 had, so a query with its own `LIMIT`,
+  however large, or with an unbounded earlier `UNION` branch returned every row
+  it produced. The rows are now counted as they are fetched and reading stops at
+  `limit`, so nothing past it is built in memory (see Changed — BREAKING).
 - Neo4j driver errors escaped as ~35-line tracebacks with exit code 1 instead of
   the documented 2 — on `verify`, `init`, `status`, `search`, `ui`, and `mcp`.
 - `graphforge mcp` exited when the database was unreachable, so the client showed
   only "server exited". The connection is now lazy: the client connects, the
-  tools list, and the reason reaches whoever asks a question.
+  tools list, and the reason reaches whoever asks a question. A failed
+  connection is retried on the next call, and starting Neo4j is enough, with no
+  client restart. After two failures in a row, each call within 5 seconds of the
+  last attempt gets that attempt's reason back, with when it was checked and
+  when it will be checked again, instead of dialling a Neo4j that is down: an
+  agent looping over tools cannot hammer it, or wait out a connect timeout on
+  every call.
 - A 5,000-file repository printed 5,000 progress bars, one per file.
 - `status` and `search` tables misaligned on any value longer than its fixed
   column width — which is most real file paths.
 - `graphforge --version` reported a hardcoded `0.1.0` that had drifted from
   `pyproject.toml`.
+- CI had been red since the extras became optional. The `dev` extra now
+  includes `mcp`, because the suite builds the real MCP server rather than a
+  stub, so `pip install -e ".[dev]"` followed by `pytest` passes again. The
+  playground e2e job and the integration job install the `postgres` extra they
+  ingest with. The MCP stdio e2e test read `CallToolResult.isError`, which mcp
+  2.x renamed to `is_error`.
 
 ### Added
 
 - `graphforge quickstart` — guided first run: configure, connect, create the
   schema, ingest, link, and register an MCP client.
 - `graphforge doctor` — checks the install, the connection and the graph, and
-  prints the command that fixes whatever is wrong.
+  prints the command that fixes whatever is wrong. It reports an `mcp` older
+  than 2.0 as unusable rather than "installed". An MCP client config it cannot
+  parse gets an `mcp config` warning naming the file, since `mcp install` leaves
+  that file alone until it is fixed or moved. It and `quickstart` read
+  `GF_ALLOW_EMPTY_PASSWORD` like every other boolean setting, so `false` and `0`
+  mean off.
 - `graphforge mcp install [--client …]` — writes the entry for Claude Code,
   Claude Desktop and Cursor. Resolves the console script from the running
   interpreter rather than `PATH`, and points at your `.env`, so no password is
-  written into a client config.
+  written into a client config. A config it cannot parse (a trailing comma, say;
+  a byte-order mark is fine) is left untouched with a message, not overwritten
+  with a merge that would erase the other servers in it. `--remove --dry-run`
+  only reports what it would remove.
 - Dashboard: guided ingest, a first-run empty state, a clickable legend, a node
-  detail panel, canvas zoom/pan/drag/fit, and real node names on the canvas.
+  detail panel, canvas zoom/pan/drag/fit, and real node names on the canvas. An
+  ingest in which every source failed, such as a failed clone or a rejected
+  login, is reported as failed. One that loaded only some sources is reported as
+  done, with the number that failed and why.
 - [SECURITY.md](SECURITY.md), and [ADR 9](docs/DESIGN.md) on the read guard.
 - `lint` and `types` are now blocking in CI; the secret scan covers GitHub, AWS,
   Slack and private-key formats across all tracked files, not `glpat-` in three
@@ -103,7 +243,7 @@ All notable changes to this project are documented here. The format is based on
 
 - MCP `find_code` is case-insensitive (`Foo` finds `foo`).
 
-## [0.2.0] — 2026-08-08
+## [0.2.0] - 2026-08-08
 
 ### Added
 

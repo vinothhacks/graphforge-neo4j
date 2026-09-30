@@ -8,16 +8,39 @@ rather than the documented 2.
 
 from __future__ import annotations
 
+import errno
 import io
 import json
+import os
+import sys
 from pathlib import Path
 
 import pytest
 
-from graphforge.cli import main, neo4j_advice
-from graphforge.core.config import DbSettings, Neo4jSettings, Settings
+from graphforge.cli import build_parser, main, neo4j_advice
+from graphforge.core.config import DbSettings, Neo4jSettings, Settings, allow_empty_password
 from graphforge.mcp import clients, install
-from graphforge.onboarding import FAIL, OK, Check, report, run_checks
+from graphforge.onboarding import (
+    FAIL,
+    INFO,
+    MIN_MCP_MAJOR,
+    OK,
+    WARN,
+    Check,
+    quickstart,
+    report,
+    run_checks,
+)
+
+
+@pytest.fixture(autouse=True)
+def _no_empty_password_opt_in(monkeypatch):
+    """A developer's exported GF_ALLOW_EMPTY_PASSWORD must not reach these tests.
+
+    With it set, every run_checks(_settings(password="")) here would try to
+    connect to a real server. Tests that need the opt-in set it themselves.
+    """
+    monkeypatch.delenv("GF_ALLOW_EMPTY_PASSWORD", raising=False)
 
 
 class _FakeNeo4jError(Exception):
@@ -102,6 +125,67 @@ def test_a_configured_password_is_never_questioned():
     Neo4jSettings(password="pw").check_connectable()
 
 
+def _record_connects(monkeypatch) -> list[int]:
+    """Count connection attempts; each one fails the way an unreachable server does."""
+    attempts: list[int] = []
+
+    def connect(_settings):
+        attempts.append(1)
+        raise _named("ServiceUnavailable", "Couldn't connect")
+
+    monkeypatch.setattr("graphforge.mcp.server.GraphQuery.connect", staticmethod(connect))
+    return attempts
+
+
+@pytest.mark.parametrize("value", ["false", "0", "no", "off", "", "  FALSE  "])
+def test_a_false_opt_in_is_refused_everywhere_not_just_before_connecting(value, monkeypatch):
+    """The doctor tested the raw string, so GF_ALLOW_EMPTY_PASSWORD=false meant "allowed".
+
+    It then reported the password as set and tried to connect without one, while
+    `check_connectable` refused the same value. All readers now share one helper.
+    """
+    attempts = _record_connects(monkeypatch)
+    monkeypatch.setattr("graphforge.onboarding._client_checks", list)
+    monkeypatch.setenv("GF_ALLOW_EMPTY_PASSWORD", value)
+
+    assert allow_empty_password() is False
+    with pytest.raises(ValueError, match="NEO4J_PASSWORD is not set"):
+        Neo4jSettings(password="").check_connectable()
+    labels = {c.label: c for c in run_checks(_settings(password=""))}
+    assert labels["NEO4J_PASSWORD"].status == FAIL, f"{value!r} was taken as an opt-in"
+    assert labels["neo4j"].status == INFO and "skipped" in labels["neo4j"].detail
+    assert attempts == [], "the doctor connected with no password"
+
+
+@pytest.mark.parametrize("value", ["true", "1", "yes", " On "])
+def test_a_true_opt_in_is_honoured_everywhere(value, monkeypatch):
+    monkeypatch.setattr(
+        "graphforge.onboarding._graph_checks", lambda _s: [Check(OK, "neo4j", "stubbed")]
+    )
+    monkeypatch.setattr("graphforge.onboarding._client_checks", list)
+    monkeypatch.setenv("GF_ALLOW_EMPTY_PASSWORD", value)
+
+    assert allow_empty_password() is True
+    Neo4jSettings(password="").check_connectable()  # must not raise
+    labels = {c.label: c for c in run_checks(_settings(password=""))}
+    assert labels["NEO4J_PASSWORD"].status == OK
+    assert "GF_ALLOW_EMPTY_PASSWORD" in labels["NEO4J_PASSWORD"].detail, "claimed a password"
+
+
+def test_quickstart_does_not_take_a_false_opt_in_as_permission(tmp_path, monkeypatch, capsys):
+    """quickstart had the same raw-string test, so it went on to connect with no password."""
+    attempts = _record_connects(monkeypatch)
+    monkeypatch.delenv("NEO4J_PASSWORD", raising=False)
+    monkeypatch.setenv("GF_ALLOW_EMPTY_PASSWORD", "false")
+    env = tmp_path / "empty.env"
+    env.write_text("", encoding="utf-8")
+
+    code = quickstart(build_parser().parse_args(["quickstart", "--yes", "--env", str(env)]))
+    assert code == 2
+    assert "NEO4J_PASSWORD is not set" in capsys.readouterr().err
+    assert attempts == [], "quickstart tried to connect with no password"
+
+
 # -------------------------------------------------------------- the doctor --
 def test_doctor_reports_a_failure_without_raising(monkeypatch):
     """An unreachable graph is a finding on the report, never an exception."""
@@ -135,6 +219,78 @@ def test_report_prints_the_fix_for_a_failing_check():
     out = io.StringIO()
     report([Check(FAIL, "neo4j", "unreachable", "docker compose up -d")], out)
     assert "-> docker compose up -d" in out.getvalue()
+
+
+def _mcp_check(monkeypatch, installed: str | None) -> Check:
+    """The doctor's mcp line, with the installed distribution version faked."""
+    from importlib import metadata
+
+    real_version = metadata.version
+
+    def version(name):
+        if name != "mcp":
+            return real_version(name)
+        if installed is None:
+            raise metadata.PackageNotFoundError(name)
+        return installed
+
+    monkeypatch.setattr(metadata, "version", version)
+    monkeypatch.setattr("graphforge.onboarding._client_checks", list)
+    return {c.label: c for c in run_checks(_settings(password=""))}["mcp extra"]
+
+
+def test_doctor_does_not_pass_an_mcp_the_server_cannot_run(monkeypatch):
+    """`import mcp` succeeds on 1.x, so the doctor said "installed" for a server
+    that cannot start: 2.0 is where FastMCP became MCPServer."""
+    check = _mcp_check(monkeypatch, "1.9.4")
+    assert check.status == WARN, "mcp 1.x was reported as fine"
+    assert "1.9.4" in check.detail and f"mcp>={MIN_MCP_MAJOR}" in check.detail
+    assert "pip install -U" in check.fix
+
+
+def test_doctor_accepts_a_current_mcp_and_names_its_version(monkeypatch):
+    check = _mcp_check(monkeypatch, "2.1.1")
+    assert check.status == OK
+    assert "2.1.1" in check.detail
+
+
+def test_doctor_says_how_to_install_a_missing_mcp(monkeypatch):
+    check = _mcp_check(monkeypatch, None)
+    assert check.status == WARN
+    assert check.detail == "not installed"
+    assert "graphforge-neo4j[mcp]" in check.fix
+
+
+def test_the_doctor_mcp_floor_matches_the_declared_pin():
+    tomllib = pytest.importorskip("tomllib")  # stdlib from 3.11; CI also runs 3.10
+
+    pyproject = tomllib.loads(
+        (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert pyproject["project"]["optional-dependencies"]["mcp"] == [f"mcp>={MIN_MCP_MAJOR}"]
+
+
+@pytest.fixture
+def isolated_clients(tmp_path, monkeypatch):
+    """Point every known client at tmp_path, never at this machine's real configs."""
+    monkeypatch.chdir(tmp_path)
+    desktop = tmp_path / "desktop" / "claude_desktop_config.json"
+    monkeypatch.setattr(clients, "_claude_desktop_path", lambda: desktop)
+    return tmp_path
+
+
+def test_doctor_reports_a_client_config_it_cannot_parse(isolated_clients):
+    """It used to read as "no config", so the doctor said "none wired up" and
+    pointed at `mcp install` -- the command that then erased the file."""
+    target = clients.client_by_key("claude-code").path
+    target.write_text('{"mcpServers": {"graphforge": {"command": "g"},}}', encoding="utf-8")
+
+    checks = run_checks(_settings(password=""))
+    broken = [c for c in checks if c.label == "mcp config"]
+    assert broken, "an unparseable client config was not reported"
+    assert broken[0].status == WARN
+    assert str(target) in broken[0].detail
+    assert "line 1" in broken[0].detail, "the parse error was not passed on"
 
 
 # --------------------------------------------------------------- mcp install --
@@ -190,6 +346,191 @@ def test_uninstall_removes_only_graphforge(tmp_path):
     written = json.loads(target.read_text(encoding="utf-8"))
     assert "graphforge" not in written["mcpServers"]
     assert written["mcpServers"]["other"] == {"command": "x"}
+
+
+def test_uninstall_dry_run_changes_nothing(tmp_path):
+    """`mcp install --remove --dry-run` really removed the entry: uninstall had no dry run."""
+    target = tmp_path / ".mcp.json"
+    install.install(["claude-code"], None, project_dir=tmp_path)
+    before = target.read_bytes()
+
+    lines = install.uninstall(["claude-code"], project_dir=tmp_path, dry_run=True)
+    assert target.read_bytes() == before, "a dry run changed the config"
+    assert any("would be removed" in ln for ln in lines), lines
+
+
+def test_install_reads_a_config_saved_with_a_bom(tmp_path):
+    """Notepad and PowerShell 5.1's Out-File write a UTF-8 BOM, which plain utf-8
+    rejects; the failed read came back as {} and the merge erased everything."""
+    target = tmp_path / ".mcp.json"
+    config = {"mcpServers": {"other": {"command": "keepme"}}, "somethingElse": True}
+    target.write_bytes(b"\xef\xbb\xbf" + json.dumps(config).encode("utf-8"))
+
+    install.install(["claude-code"], None, project_dir=tmp_path)
+    written = json.loads(target.read_text(encoding="utf-8"))
+    assert written["mcpServers"]["other"] == {"command": "keepme"}, "a BOM erased the config"
+    assert written["somethingElse"] is True
+    assert "graphforge" in written["mcpServers"]
+
+
+_UNPARSEABLE = {
+    "trailing comma": '{"mcpServers": {"other": {"command": "keepme"},}}',
+    "top-level array": '[{"mcpServers": {"other": {"command": "keepme"}}}]',
+    "servers not an object": '{"mcpServers": ["other"], "keep": 1}',
+}
+
+
+@pytest.mark.parametrize("content", _UNPARSEABLE.values(), ids=list(_UNPARSEABLE))
+def test_install_never_overwrites_a_config_it_cannot_parse(content, tmp_path):
+    target = tmp_path / ".mcp.json"
+    target.write_text(content, encoding="utf-8")
+    before = target.read_bytes()
+
+    lines = install.install(["claude-code", "cursor"], None, project_dir=tmp_path)
+    assert target.read_bytes() == before, "an unparseable config was overwritten"
+    refused = [ln for ln in lines if ln.startswith("Claude Code")]
+    assert refused and "left untouched" in refused[0], lines
+    assert str(target) in refused[0], "the message does not name the file"
+    # The other client is independent of this one and still gets its entry.
+    assert clients.client_by_key("cursor", tmp_path).has_graphforge()
+
+
+def test_the_refusal_passes_on_the_parse_error(tmp_path):
+    (tmp_path / ".mcp.json").write_text(_UNPARSEABLE["trailing comma"], encoding="utf-8")
+    [line] = install.install(["claude-code"], None, project_dir=tmp_path, dry_run=True)
+    assert "cannot parse" in line and "line 1 column" in line, line
+
+
+def test_uninstall_never_touches_a_config_it_cannot_parse(tmp_path):
+    """It used to read the broken file as {} and report "not registered"."""
+    target = tmp_path / ".mcp.json"
+    target.write_text(
+        '{"mcpServers": {"graphforge": {"command": "g"}, "other": {}},}', encoding="utf-8"
+    )
+    before = target.read_bytes()
+
+    [line] = install.uninstall(["claude-code"], project_dir=tmp_path)
+    assert target.read_bytes() == before
+    assert "left untouched" in line and "cannot parse" in line, line
+
+
+def test_an_unreadable_config_is_refused_not_mistaken_for_a_missing_one(tmp_path):
+    (tmp_path / ".mcp.json").mkdir()  # exists, but reading it fails
+    [line] = install.install(["claude-code"], None, project_dir=tmp_path)
+    assert "left untouched" in line and "cannot read" in line, line
+
+
+def test_an_empty_config_file_still_counts_as_no_config(tmp_path):
+    """Strict parsing is about not losing data; a zero-byte file holds none."""
+    target = tmp_path / ".mcp.json"
+    target.write_text("", encoding="utf-8")
+    install.install(["claude-code"], None, project_dir=tmp_path)
+    assert "graphforge" in json.loads(target.read_text(encoding="utf-8"))["mcpServers"]
+
+
+def test_a_failed_write_leaves_the_existing_config_whole(tmp_path, monkeypatch):
+    """A write that dies halfway (disk full, crash) truncated the file in place.
+
+    Simulated by letting every text file opened for writing take half of what
+    it is given and then fail. Writing to a temporary file and renaming it over
+    the original means the original is either fully replaced or not touched.
+    """
+    target = tmp_path / ".mcp.json"
+    original = json.dumps({"mcpServers": {"other": {"command": "keepme"}}})
+    target.write_text(original, encoding="utf-8")
+    real_open = io.open
+
+    class _DiskFull:
+        def __init__(self, fh):
+            self._fh = fh
+
+        def write(self, text):
+            self._fh.write(text[: len(text) // 2])
+            self._fh.flush()
+            raise OSError(errno.ENOSPC, "No space left on device")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_exc):
+            self._fh.close()
+            return False
+
+        def __getattr__(self, name):
+            return getattr(self._fh, name)
+
+    def half_open(file, mode="r", *args, **kwargs):
+        fh = real_open(file, mode, *args, **kwargs)
+        return _DiskFull(fh) if "w" in mode else fh
+
+    monkeypatch.setattr(io, "open", half_open)
+    lines = install.install(["claude-code"], None, project_dir=tmp_path)
+    monkeypatch.undo()
+
+    assert target.read_text(encoding="utf-8") == original, "a failed write truncated the file"
+    assert any("could not write" in ln for ln in lines), lines
+    assert [p.name for p in tmp_path.iterdir()] == [".mcp.json"], "a temp file was left behind"
+
+
+def test_a_symlinked_config_is_written_through_not_replaced(tmp_path):
+    """A rename would swap a dotfiles-managed symlink for a plain file."""
+    real = tmp_path / "dotfiles" / "mcp.json"
+    real.parent.mkdir()
+    real.write_text(json.dumps({"mcpServers": {"other": {"command": "k"}}}), encoding="utf-8")
+    link = tmp_path / ".mcp.json"
+    try:
+        link.symlink_to(real)
+    except (OSError, NotImplementedError):
+        pytest.skip("this platform or account cannot create symlinks")
+
+    install.install(["claude-code"], None, project_dir=tmp_path)
+    assert link.is_symlink(), "the symlink was replaced by a regular file"
+    written = json.loads(real.read_text(encoding="utf-8"))
+    assert set(written["mcpServers"]) == {"other", "graphforge"}
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_rewriting_a_config_keeps_its_permissions(tmp_path):
+    target = tmp_path / ".mcp.json"
+    target.write_text("{}", encoding="utf-8")
+    os.chmod(target, 0o640)
+    install.install(["claude-code"], None, project_dir=tmp_path)
+    assert (target.stat().st_mode & 0o777) == 0o640
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="POSIX permission bits")
+def test_a_new_config_gets_the_usual_mode_not_mkstemps_0600(tmp_path):
+    previous = os.umask(0o022)
+    try:
+        install.install(["claude-code"], None, project_dir=tmp_path)
+    finally:
+        os.umask(previous)
+    assert ((tmp_path / ".mcp.json").stat().st_mode & 0o777) == 0o644
+
+
+def test_a_config_held_open_on_windows_is_still_written(tmp_path, monkeypatch):
+    """Windows refuses os.replace over a file another process holds open.
+
+    The old in-place write worked there, so the atomic rename falls back to it
+    on Windows; elsewhere the error is real and the config is left alone.
+    """
+    target = tmp_path / ".mcp.json"
+    target.write_text(json.dumps({"mcpServers": {"other": {"command": "k"}}}), encoding="utf-8")
+
+    def locked(_src, _dst):
+        raise PermissionError(13, "The process cannot access the file")
+
+    monkeypatch.setattr(clients.os, "replace", locked)
+    client = clients.McpClient("claude-code", "Claude Code", target, project_scoped=True)
+    merged = {"mcpServers": {"other": {"command": "k"}, "graphforge": {"command": "g"}}}
+    if os.name == "nt":
+        client.write(merged)
+        assert json.loads(target.read_text(encoding="utf-8")) == merged
+    else:
+        with pytest.raises(PermissionError):
+            client.write(merged)
+        assert set(json.loads(target.read_text(encoding="utf-8"))["mcpServers"]) == {"other"}
+    assert [p.name for p in tmp_path.iterdir()] == [".mcp.json"], "a temp file was left behind"
 
 
 # ------------------------------------------------------ mcp starts anyway --

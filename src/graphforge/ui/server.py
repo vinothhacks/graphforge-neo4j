@@ -24,6 +24,7 @@ Every endpoint validates its own input and re-applies the MCP write guard
 from __future__ import annotations
 
 import contextlib
+import ipaddress
 import json
 import logging
 import secrets
@@ -47,6 +48,11 @@ MAX_BODY = 64 * 1024
 #: Hosts the guided-ingest endpoints will answer on. Anything else and they do
 #: not exist: binding publicly turns the dashboard back into a pure viewer.
 LOOPBACK_HOSTS = frozenset({"127.0.0.1", "::1", "localhost", "[::1]"})
+#: The only scheme this server speaks: http.server has no TLS, so a page served
+#: over https reached it, if at all, through a TLS-terminating proxy in front.
+#: Only a public bind is assumed to have one (see :func:`is_same_origin`).
+SERVED_SCHEME = "http"
+_DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def _host_only(netloc: str) -> str:
@@ -64,6 +70,57 @@ def _host_only(netloc: str) -> str:
 def is_loopback_host(host: str) -> bool:
     """True when an authority names this machine and nothing else."""
     return _host_only(host).lower() in LOOPBACK_HOSTS
+
+
+def _origin_of(scheme: str, authority: str) -> tuple[str, str, int] | None:
+    """``(scheme, host, port)`` for an authority, or ``None`` if it cannot be read.
+
+    The default port is filled in and IP literals are normalised, so
+    ``localhost`` and ``localhost:80`` are one origin and ``[::1]`` matches
+    however it is spelt. Credentials, paths and bad ports make it unreadable.
+    """
+    scheme = (scheme or "").lower()
+    if scheme not in _DEFAULT_PORTS or not authority or "@" in authority:
+        return None
+    try:
+        parts = urlsplit(f"//{authority}")
+        host, port = parts.hostname, parts.port
+    except ValueError:  # unbalanced brackets, a non-numeric or out-of-range port
+        return None
+    if not host or parts.path or parts.query or parts.fragment:
+        return None
+    with contextlib.suppress(ValueError):  # not an IP literal: a name, kept as is
+        host = ipaddress.ip_address(host).compressed
+    return scheme, host, _DEFAULT_PORTS[scheme] if port is None else port
+
+
+def is_same_origin(origin: str, host: str, *, tls_front_end: bool = False) -> bool:
+    """True when an ``Origin`` header names exactly this server as reached via ``Host``.
+
+    Scheme, host *and* port must all agree. Comparing hosts alone let a page on
+    any other localhost port (every dev server the user runs) pass as this one.
+    ``null`` and anything that is not a bare ``scheme://host[:port]`` match nothing.
+
+    ``tls_front_end`` is for a public bind, which may sit behind a reverse proxy
+    that terminates TLS and forwards ``Host``: the browser then sends
+    ``https://graph.example.com`` while ``Host`` is ``graph.example.com``, the
+    proxy's authority. There an https ``Origin`` is taken to have reached a TLS
+    front end, so ``Host`` is read as https too (no port means 443); host and
+    port must still agree, and an http ``Origin`` is judged exactly as before.
+    A loopback bind never gets this: a page on https://localhost is some other
+    local server, not a proxy for this one.
+    """
+    try:
+        sent = urlsplit((origin or "").strip())
+    except ValueError:
+        return False
+    if sent.path or sent.query or sent.fragment:
+        return False
+    theirs = _origin_of(sent.scheme, sent.netloc)
+    if theirs is None:
+        return False
+    reached_as = "https" if tls_front_end and theirs[0] == "https" else SERVED_SCHEME
+    return theirs == _origin_of(reached_as, (host or "").strip())
 
 
 def _mask(secret: str) -> str:
@@ -186,6 +243,39 @@ def parse_body(body: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError("request body must be a JSON object")
     return data
+
+
+def api_segments(path: str) -> list[str] | None:
+    """The segments after ``/api`` that :func:`route` dispatches on, or ``None``.
+
+    Empty segments are dropped, so ``/api//ingest`` and ``/api/ingest/`` are
+    ``["ingest"]``. This is the only place a path is split: the router and the
+    token gate both read it, so no spelling can mean one thing to each.
+    """
+    clean = urlsplit(path or "/").path or "/"
+    parts = [p for p in clean.split("/") if p]
+    if not parts or parts[0] != "api":
+        return None
+    return parts[1:]
+
+
+#: Non-GET endpoints that need no per-run token. The console's Cypher is
+#: read-only by construction (guarded before connecting and again inside
+#: GraphQuery), and it has to keep working on a public bind, which has no token.
+_TOKEN_EXEMPT = frozenset({("query",)})
+
+
+def requires_token(path: str, method: str = "GET") -> bool:
+    """True when a request must present the per-run ``X-GF-Token`` to be routed.
+
+    Fail-closed: every non-GET API request needs the token unless its endpoint
+    is in ``_TOKEN_EXEMPT``, so an endpoint added later that changes something
+    is guarded before anyone remembers to list it.
+    """
+    rest = api_segments(path)
+    if rest is None or (method or "GET").upper() == "GET":
+        return False
+    return tuple(rest) not in _TOKEN_EXEMPT
 
 
 def schema_payload(schema: dict[str, Any]) -> dict[str, Any]:
@@ -375,10 +465,9 @@ def route(
     params = parse_qs(query if query else parsed.query, keep_blank_values=True)
     limit_param = _first(params, "limit", "")
 
-    parts = [p for p in clean.strip("/").split("/") if p]
-    if not parts or parts[0] != "api":
+    rest = api_segments(path)
+    if rest is None:
         return 404, {"error": f"not found: {clean}"}
-    rest = parts[1:]
 
     # -- POST -------------------------------------------------------------
     if rest == ["query"]:
@@ -566,18 +655,23 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
             * **Drive-by CSRF** — a cross-origin ``fetch`` with
               ``Content-Type: text/plain`` is a *simple* request and is sent with
               no preflight, so a foreign ``Origin`` is refused rather than run.
+              Foreign means any other scheme, host *or port*: a page on another
+              localhost port is a different origin, however local it looks. On a
+              public bind an https page on the same host and port also passes,
+              since that is how a TLS-terminating reverse proxy presents it.
+
+            A request with no ``Origin`` proceeds, as before: browsers attach one
+            to every POST, and a cross-origin GET cannot read what comes back.
+            ``Referer`` and ``Sec-Fetch-Site`` are not consulted; the latter
+            calls another localhost port ``same-site``, the very case above.
             """
             if loopback_bind and not is_loopback_host(self.headers.get("Host", "")):
                 return "unexpected Host header (dashboard is bound to loopback)"
             origin = (self.headers.get("Origin") or "").strip()
             if not origin:
                 return None
-            if origin.lower() == "null":
-                return "cross-origin request rejected"
-            if (
-                _host_only(urlsplit(origin).netloc).lower()
-                != _host_only(self.headers.get("Host", "")).lower()
-            ):
+            host = self.headers.get("Host", "")
+            if not is_same_origin(origin, host, tls_front_end=not loopback_bind):
                 return "cross-origin request rejected"
             return None
 
@@ -598,12 +692,15 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
                 self._json(403, {"error": refused})
                 return
             parsed = urlsplit(self.path)
-            if parsed.path == "/api" or parsed.path.startswith("/api/"):
-                # Anything that can change the graph needs the per-run token.
-                if (
-                    parsed.path.startswith("/api/ingest")
-                    and method != "GET"
-                    and (not token or self.headers.get("X-GF-Token") != token)
+            if api_segments(parsed.path) is not None:
+                # Anything that can change the graph needs the per-run token. The
+                # decision reads the same segments route() dispatches on, so no
+                # spelling of the path (/api//ingest) can slip past it.
+                # Constant-time, and on bytes: compare_digest raises on a str
+                # with non-ASCII characters, which a header can carry.
+                sent = (self.headers.get("X-GF-Token") or "").encode("utf-8", "replace")
+                if requires_token(parsed.path, method) and (
+                    not token or not secrets.compare_digest(sent, token.encode("ascii"))
                 ):
                     self._json(403, {"error": "missing or invalid X-GF-Token"})
                     return

@@ -5,7 +5,8 @@ the graph with these tools:
 
 * ``get_schema``             — labels, relationship types, and per-label counts
   (TTL-cached; see :class:`GraphQuery.get_schema`)
-* ``read_cypher``            — run a read-only Cypher query (writes are rejected)
+* ``read_cypher``            — run a read-only Cypher query (writes, admin commands
+  and plugin procedures / functions such as ``apoc.*`` are rejected)
 * ``search_nodes``           — substring search on a property of a given label (paged)
 * ``node_neighbors``         — the immediate neighbourhood of a node id
 * ``find_code``              — locate files / classes / methods by name (paged, case-insensitive)
@@ -29,7 +30,10 @@ lazily, only when the server is actually started.
 
 from __future__ import annotations
 
+import contextlib
+import itertools
 import json
+import math
 import re
 import threading
 import time
@@ -41,11 +45,11 @@ from ..core.config import Neo4jSettings, load_settings
 from ..core.errors import MissingExtra
 
 _IDENT = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
-#: A LIMIT clause the user actually wrote, and a RETURN that can carry one.
-#: Both are matched against masked text so a LIMIT inside a string literal
-#: is treated as data, not as a clause.
-_HAS_LIMIT = re.compile(r"\bLIMIT\b", re.IGNORECASE)
-_HAS_RETURN = re.compile(r"\bRETURN\b", re.IGNORECASE)
+#: What :func:`_needs_outer_limit` walks: every bracket, plus each RETURN and
+#: LIMIT keyword. Matched against masked text so a LIMIT inside a string
+#: literal is data, not a clause; the lookbehind skips ``n.limit``,
+#: ``$limit`` and ``:Limit``, which are a property, a parameter and a label.
+_CLAUSE_TOKEN = re.compile(r"[(\[{]|[)\]}]|(?<![.:$])\b(RETURN|LIMIT)\b", re.IGNORECASE)
 
 #: Paging with SKIP/LIMIT and no ORDER BY is unsound: Neo4j guarantees no order
 #: between two queries, so the same row can appear on two pages while another is
@@ -57,6 +61,10 @@ _PAGE_ORDER = "ORDER BY n.id, elementId(n) "
 
 #: Default lifetime of a cached ``get_schema`` snapshot, in seconds.
 DEFAULT_SCHEMA_TTL = 60.0
+
+#: How long :class:`LazyGraph` answers from its last failed connection attempt
+#: instead of dialling a Neo4j that is down, in seconds.
+CONNECT_RETRY_COOLDOWN = 5.0
 
 #: Process-wide schema cache, shared by every :class:`GraphQuery` built through
 #: :meth:`GraphQuery.connect` with the same connection settings. The dashboard
@@ -116,6 +124,29 @@ def _clamp_offset(offset: int) -> int:
         return 0
 
 
+def _needs_outer_limit(masked: str) -> bool:
+    """True when the query ends in a top-level RETURN that carries no LIMIT.
+
+    Only depth 0 counts. A RETURN or LIMIT inside ``CALL { }``, ``EXISTS { }``,
+    ``COUNT { }`` or ``COLLECT { }`` belongs to that subquery and caps nothing
+    the outer query yields, so matching one anywhere in the text suppressed the
+    real cap. ``masked`` must come from :func:`graphforge.query_guard.mask_query`,
+    so brackets inside strings and comments are already gone.
+    """
+    depth = 0
+    words: list[str] = []
+    for token in _CLAUSE_TOKEN.finditer(masked):
+        word = token.group(1)
+        if word is None:
+            depth = depth + 1 if token.group(0) in "([{" else max(0, depth - 1)
+        elif depth == 0:
+            words.append(word.upper())
+    if "RETURN" not in words:
+        return False  # a standalone CALL: there is no clause to hang a LIMIT on
+    last_return = len(words) - 1 - words[::-1].index("RETURN")
+    return "LIMIT" not in words[last_return + 1 :]
+
+
 def _clean_rows(rows: list[dict] | None, *keys: str) -> list[dict]:
     """Drop the all-null placeholder maps Cypher's ``collect()`` yields on OPTIONAL MATCH."""
     out = []
@@ -156,7 +187,17 @@ class GraphQuery:
         from neo4j import GraphDatabase
 
         driver = GraphDatabase.driver(settings.uri, auth=(settings.user, settings.password))
-        driver.verify_connectivity()
+        try:
+            driver.verify_connectivity()
+        except BaseException:
+            # A driver owns a connection pool whether or not it ever connected.
+            # Nobody else holds a reference to this one, so an unreachable
+            # server leaked a pool per attempt -- one per tool call from
+            # LazyGraph. A failing close must not mask the real error, which is
+            # what the caller turns into advice.
+            with contextlib.suppress(Exception):
+                driver.close()
+            raise
         return cls(
             driver,
             settings.database,
@@ -168,11 +209,25 @@ class GraphQuery:
 
     # -- primitives --------------------------------------------------------
     def _read(
-        self, cypher: str, params: dict[str, Any] | None = None, timeout: float | None = None
+        self,
+        cypher: str,
+        params: dict[str, Any] | None = None,
+        timeout: float | None = None,
+        *,
+        max_rows: int | None = None,
     ) -> list[dict]:
+        """Run ``cypher`` in a read transaction; ``max_rows`` caps what is fetched.
+
+        With ``max_rows`` the result is read lazily and abandoned at the cap, so
+        a query yielding a million rows costs ``max_rows`` dicts rather than a
+        million dicts trimmed afterwards. Nothing past the cap is turned into a
+        dict: when the managed transaction commits, the driver drops what is
+        left of the batch in flight and DISCARDs the rest on the server.
+        """
+
         def _work(tx):
             result = tx.run(cypher, params or {})
-            return [r.data() for r in result]
+            return [r.data() for r in itertools.islice(result, max_rows)]
 
         if timeout is not None:
             from neo4j import unit_of_work
@@ -279,13 +334,19 @@ class GraphQuery:
         # newline before LIMIT is formatting, not absence of a cap (so multi-line
         # Cypher had a second LIMIT appended -- a syntax error), and a " LIMIT "
         # inside a string literal is data, not a clause (so the cap was skipped).
-        masked = mask_query(query)
-        if _HAS_RETURN.search(masked) and not _HAS_LIMIT.search(masked):
-            query = query.rstrip("; \n") + f"\nLIMIT {int(limit)}"
-        rows = self._read(query, params, timeout=READ_TX_TIMEOUT_SECONDS)
-        # Backstop for shapes that cannot carry a LIMIT clause: a standalone
-        # CALL is a syntax error with one appended, so it is capped here.
-        return rows[:limit]
+        # Only the final top-level RETURN's own LIMIT counts; see
+        # _needs_outer_limit for why one inside a subquery does not.
+        # The guard admits any trailing run of ";" and whitespace (including a
+        # Windows "\r\n"); Neo4j rejects "; ;" and a ";" before an appended LIMIT.
+        query = re.sub(r"[;\s]+$", "", query)
+        if _needs_outer_limit(mask_query(query)):
+            query += f"\nLIMIT {int(limit)}"
+        # The fetch cap is the backstop for what the clause cannot cover: a
+        # standalone CALL is a syntax error with a LIMIT appended, a user's own
+        # LIMIT may be larger than `limit`, and a LIMIT on the last UNION branch
+        # leaves the earlier ones unbounded. Capping the fetch rather than
+        # slicing afterwards is what bounds memory -- slicing built every row.
+        return self._read(query, params, timeout=READ_TX_TIMEOUT_SECONDS, max_rows=limit)
 
     def search_nodes(
         self, label: str, prop: str, value: str, limit: int = 25, offset: int = 0
@@ -835,9 +896,23 @@ class LazyGraph:
     lists the tools; an unreachable graph is answered as a readable error to
     whoever asked. Because a failed attempt leaves the connection unset, simply
     starting Neo4j is enough -- no client restart.
+
+    A failure is retried on the next call, which covers a blip such as a
+    restarting server. Once two attempts in a row have failed, the database is
+    treated as down: for ``retry_cooldown`` seconds each call re-raises the last
+    failure's advice rather than dialling again, so an agent looping over tools
+    cannot hammer it, and an unreachable host cannot stall every call for the
+    driver's connection timeout. The first call after the cooldown dials again,
+    and one success clears it all.
     """
 
-    def __init__(self, settings: Neo4jSettings):
+    def __init__(
+        self,
+        settings: Neo4jSettings,
+        *,
+        retry_cooldown: float = CONNECT_RETRY_COOLDOWN,
+        clock: Callable[[], float] | None = None,
+    ):
         # Import the driver now; connect later. These two halves look alike and
         # are not: the import is cheap and cannot fail for any reason the user
         # can act on, while the connection is slow and fails whenever the
@@ -858,21 +933,50 @@ class LazyGraph:
         # connect() at once. Under 1.x they were serialised on the event loop
         # and this could not happen. P7 replaces this with a real pool.
         self._lock = threading.Lock()
+        self._retry_cooldown = float(retry_cooldown)
+        #: Monotonic clock; injectable so the cooldown is testable without sleeping.
+        self._clock = clock or time.monotonic
+        #: Failed attempts in a row, and the last one as (advice, cause, when).
+        #: Both are guarded by ``_lock`` and cleared by a successful connect.
+        self._failures = 0
+        self._last_failure: tuple[str, BaseException, float] | None = None
 
     def connect(self) -> GraphQuery:
         if self._graph is None:
             with self._lock:
                 if self._graph is None:
-                    from ..core.errors import neo4j_advice
-
-                    try:
-                        self._graph = GraphQuery.connect(self._settings)
-                    except Exception as exc:
-                        advice = neo4j_advice(exc, self._settings)
-                        if advice is None:
-                            raise
-                        raise RuntimeError(advice) from exc
+                    self._graph = self._dial()
         return self._graph
+
+    def _dial(self) -> GraphQuery:
+        """One connection attempt, or the last failure again during the cooldown."""
+        from ..core.errors import neo4j_advice
+
+        if self._last_failure is not None and self._failures > 1:
+            last_advice, cause, failed_at = self._last_failure
+            now = self._clock()
+            wait = failed_at + self._retry_cooldown - now
+            if wait > 0:
+                # A fresh exception each time: re-raising a cached one would
+                # grow its traceback on every call.
+                raise RuntimeError(
+                    f"{last_advice}\n  (last checked {now - failed_at:.0f}s ago; "
+                    f"checking again in {math.ceil(wait)}s)"
+                ) from cause
+        try:
+            graph = GraphQuery.connect(self._settings)
+        except Exception as exc:
+            advice = neo4j_advice(exc, self._settings)
+            if advice is None:
+                raise  # not a Neo4j failure: a bug or bad config, never cached
+            self._failures += 1
+            # Stamped after the attempt, so a slow timeout does not eat into
+            # the cooldown it triggers.
+            self._last_failure = (advice, exc, self._clock())
+            raise RuntimeError(advice) from exc
+        self._failures = 0
+        self._last_failure = None
+        return graph
 
     def close(self) -> None:
         if self._graph is not None:
@@ -924,9 +1028,15 @@ def build_server(settings: Neo4jSettings | None = None, graph: Any = None):
     def read_cypher(query: str, limit: int = 200) -> str:
         """Run a READ-ONLY Cypher query against the knowledge graph and return rows as JSON.
 
-        Writes, LOAD CSV, USE, SHOW, multi-statement queries, and procedures
-        outside the allowlist (db.labels, db.relationshipTypes, db.propertyKeys)
-        are rejected before a transaction is opened.
+        Rejected before a transaction is opened: writes, LOAD CSV, USE, SHOW and
+        the other administration commands (TERMINATE, GRANT, ALTER, START, ...),
+        multi-statement queries, procedures outside the allowlist (db.labels,
+        db.relationshipTypes, db.propertyKeys), and plugin functions. A function
+        with a namespace is allowed only when the namespace is Neo4j's own: date,
+        datetime, localdatetime, localtime, time, duration, point or
+        vector.similarity. So apoc.* and gds.* functions are refused, and so are
+        db.* and graph.* functions. Functions without a namespace (count,
+        toLower, coalesce, ...) are always built in and always allowed.
         """
         return _json(gq.read_cypher(query, limit=limit))
 

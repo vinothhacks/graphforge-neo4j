@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 
+from ..core.errors import MissingExtra
+
 log = logging.getLogger("graphforge.git.discover")
 
 #: Hard ceiling on pagination. 100 projects a page, so this is 50,000 repositories
@@ -24,13 +26,13 @@ def gitlab_group_repos(
     try:
         import requests  # lazy: GitLab discovery is the only thing that needs it
     except ImportError as exc:  # pragma: no cover
-        raise RuntimeError(
+        raise MissingExtra(
             "GitLab discovery is not installed. Run: pip install 'graphforge-neo4j[gitlab]'"
         ) from exc
 
     server = server.rstrip("/")
     headers = {"PRIVATE-TOKEN": token} if token else {}
-    params_base = {
+    params_base: dict[str, str | int] = {
         "include_subgroups": "true",
         "per_page": 100,
         "archived": "false",
