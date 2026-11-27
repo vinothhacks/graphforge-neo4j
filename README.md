@@ -396,6 +396,8 @@ Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.jso
 
 ## Dashboard
 
+The dashboard is unauthenticated. Use it only on your own machine and keep it bound to loopback.
+
 ```bash
 graphforge ui        # then open http://localhost:8000
 ```

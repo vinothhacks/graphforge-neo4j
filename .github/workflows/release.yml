@@ -75,6 +75,31 @@ jobs:
           python -m pip install --upgrade twine
           python -m twine check --strict dist/*
 
+      - name: Start disposable Neo4j
+        run: docker compose -f docker-compose.ci.yml up -d --wait neo4j
+
+      - name: Verify wheel and sdist installs
+        env:
+          NEO4J_URI: bolt://127.0.0.1:7687
+          NEO4J_USER: neo4j
+          NEO4J_PASSWORD: graphforge-ci-password
+          NEO4J_DATABASE: neo4j
+        run: |
+          set -euo pipefail
+          for archive in dist/*.whl dist/*.tar.gz; do
+            env_dir="$(mktemp -d)"
+            python -m venv "$env_dir"
+            "$env_dir/bin/python" -m pip install "$archive[mcp]"
+            "$env_dir/bin/graphforge" --version
+            "$env_dir/bin/graphforge" init
+            "$env_dir/bin/graphforge" doctor
+            "$env_dir/bin/graphforge" mcp install --client cursor --dry-run
+          done
+
+      - name: Stop disposable Neo4j
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v
+
       # Advisory only. An RC tag (v0.2.0-rc1) legitimately differs from the
       # PEP 440 version in pyproject.toml (0.2.0rc1), and the index itself is
       # the real authority on version collisions - so this warns, never fails.
@@ -184,6 +209,9 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           name: release-notes
+      - name: Generate release checksums
+        working-directory: dist
+        run: sha256sum -- *.whl *.tar.gz > SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           name: ${{ github.ref_name }}
