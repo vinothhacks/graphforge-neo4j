@@ -1,4 +1,4 @@
-# Local pre-commit hooks.
+# Local pre-commit hooks. Install the dev extra with Python 3.11 or newer.
 #
 #   pip install -e ".[dev]"
 #   pre-commit install                 # run on every `git commit`
@@ -7,7 +7,7 @@
 #
 # `rev`s are pinned to released tags rather than floating, so a hook release can
 # never silently change what a commit is checked against. The ruff pin must stay
-# equal to the one in .github/workflows/ci.yml, or a local `pre-commit run` and
+# equal to the one in .github/constraints.txt, or a local `pre-commit run` and
 # CI will disagree about what "clean" means.
 #
 # The tree was formatted with ruff 0.16.5 in a697f48, so `pre-commit run
@@ -25,12 +25,12 @@ default_language_version:
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.16.5
+    rev: v0.16.10
     hooks:
       # Lint. --fix applies the safe autofixes (import sorting, comprehension
       # rewrites, ...); --exit-non-zero-on-fix stops the commit so the changes
       # get staged and reviewed rather than silently applied.
-      - id: ruff
+      - id: ruff-check
         args: [--fix, --exit-non-zero-on-fix]
       # Format. Reads line-length / target-version from pyproject.toml.
       - id: ruff-format
