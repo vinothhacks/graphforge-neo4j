@@ -25,8 +25,8 @@ services:
       # Accept connections from the runner, not just from inside the container.
       NEO4J_server_default__listen__address: 0.0.0.0
     ports:
-      - "7474:7474"   # HTTP
-      - "7687:7687"   # Bolt
+      - "127.0.0.1:7474:7474"   # HTTP
+      - "127.0.0.1:7687:7687"   # Bolt
     healthcheck:
       # cypher-shell ships inside the image, so this proves Bolt is actually
       # serving queries - not merely that a port is open.
@@ -44,7 +44,7 @@ services:
       POSTGRES_PASSWORD: graphforge-ci-password
       POSTGRES_DB: shopdb
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U graphforge -d shopdb"]
       interval: 5s

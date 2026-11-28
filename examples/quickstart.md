@@ -15,6 +15,8 @@ cp .env.example .env                  # then edit .env with your Neo4j password
 
 ## 1. Start Neo4j (optional helper)
 
+Set `NEO4J_PASSWORD` in the repository root's `.env` before starting Compose.
+
 ```bash
 docker compose up -d           # Neo4j at bolt://127.0.0.1:7687
 ```

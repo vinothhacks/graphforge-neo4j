@@ -20,6 +20,7 @@ missing section produces a short placeholder body and a ``::warning::``
 annotation on stderr, because an imperfect release note is not a reason to abort
 a publish that has already happened.
 """
+
 from __future__ import annotations
 
 import re
@@ -68,7 +69,9 @@ def main(argv: list[str]) -> int:
         print("usage: changelog_section.py <tag> [CHANGELOG.md]", file=sys.stderr)
         return 2
     tag = argv[0]
-    path = Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+    path = (
+        Path(argv[1]) if len(argv) > 1 else Path(__file__).resolve().parent.parent / "CHANGELOG.md"
+    )
 
     if not path.is_file():
         print(f"::warning::{path} not found; using a placeholder release body", file=sys.stderr)

@@ -22,7 +22,7 @@ git clone <your-fork>
 cd graphforge
 python -m venv .venv && source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e ".[dev,all]"
-pre-commit install                                   # optional but recommended
+pre-commit install                                   # optional, requires Python 3.11+
 pytest
 ruff check src tests
 ```

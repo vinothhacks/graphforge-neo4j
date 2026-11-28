@@ -222,6 +222,21 @@ def test_query_rejects_bad_bodies_and_wrong_method():
     assert code == 400 and "too long" in payload["error"]
 
 
+@pytest.mark.parametrize(
+    "body",
+    [
+        b'{"cypher":"RETURN "\xff"}',
+        b'{"cypher":' + b"[" * 2000 + b"0" + b"]" * 2000 + b"}",
+        {"cypher": ["RETURN 1"]},
+    ],
+)
+def test_query_rejects_invalid_utf8_excessive_nesting_and_non_text(body):
+    spy = _Spy()
+    code, _ = srv.route("/api/query", "", body, _settings(), method="POST", connect=spy)
+    assert code == 400
+    assert spy.connections == 0
+
+
 # ---------------------------------------- GET /api/labels/<label>/sample ----
 def test_label_sample_rejects_non_identifier_labels():
     bad = [
@@ -594,6 +609,21 @@ def _raw(port, method, path, headers=None, body=None):
         return response.status, text
 
 
+@pytest.mark.parametrize(
+    ("headers", "status", "error"),
+    [
+        ({"Content-Length": "-1"}, 400, "invalid Content-Length"),
+        ({"Content-Length": "invalid"}, 400, "invalid Content-Length"),
+        ({"Content-Length": str(srv.MAX_BODY + 1)}, 413, "request body too large"),
+        ({"Transfer-Encoding": "chunked"}, 400, "Transfer-Encoding is unsupported"),
+    ],
+)
+def test_post_rejects_invalid_body_headers(headers, status, error):
+    with _serving() as port:
+        code, payload = _raw(port, "POST", "/api/query", headers=headers)
+    assert (code, payload) == (status, {"error": error})
+
+
 class _FakeJobs:
     """Records whether route() ever handed a request to the ingest runner."""
 
@@ -843,6 +873,7 @@ def test_handler_serves_the_shell_and_rejects_writes_over_the_wire():
     try:
         with urllib.request.urlopen(base + "/", timeout=10) as resp:
             assert resp.status == 200
+            assert resp.headers["Cache-Control"] == "no-store"
             assert "graphforge" in resp.read().decode("utf-8")
 
         request = urllib.request.Request(

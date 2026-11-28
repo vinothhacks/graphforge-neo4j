@@ -10,7 +10,10 @@ The published PyPI v0.2.0 package lacks both commands. See the
 
 ## 1. Neo4j
 
-Start the bundled instance from the repository root:
+Copy [`.env.example`](../.env.example) to `.env` at the repository root and
+set `NEO4J_PASSWORD` to your own password. On first start, Docker Compose
+uses that value to initialize Neo4j. For an existing volume, use the
+password already set in Neo4j.
 
 ```bash
 docker compose up -d
@@ -21,17 +24,6 @@ docker compose up -d
 | Neo4j Browser | [http://localhost:7474](http://localhost:7474) |
 | Bolt | `bolt://127.0.0.1:7687` |
 | User | `neo4j` |
-| Password | whatever you set as `NEO4J_AUTH` in `docker-compose.yml` (default placeholder: `please-change-me`) |
-
-Change the password before anything real lands in the graph, and put the same
-value in a local `.env` (copy [`.env.example`](../.env.example)):
-
-```bash
-NEO4J_URI=bolt://127.0.0.1:7687
-NEO4J_USER=neo4j
-NEO4J_PASSWORD=please-change-me
-NEO4J_DATABASE=neo4j
-```
 
 Check the candidate install, Neo4j connection, and graph:
 
