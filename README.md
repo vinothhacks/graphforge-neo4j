@@ -90,7 +90,7 @@ python -m pip install ".[mcp]"
 cp .env.example .env                          # then set your Neo4j password in .env
 ```
 
-Need a graph to write into? `docker compose up -d` starts Neo4j 5 at `bolt://127.0.0.1:7687` (edit the password in `docker-compose.yml` and mirror it in `.env`).
+Need a graph to write into? Set `NEO4J_PASSWORD` in your local `.env`, then run `docker compose up -d` to start Neo4j 5 at `bolt://127.0.0.1:7687`.
 
 Requires **Python 3.10+** and the `git` CLI. SQL Server additionally needs a system ODBC driver installed.
 
