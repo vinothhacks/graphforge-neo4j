@@ -238,8 +238,11 @@ def parse_body(body: Any) -> dict[str, Any]:
     if isinstance(body, dict):
         return body
     if isinstance(body, bytes | bytearray):
-        body = bytes(body).decode("utf-8", "replace")
-    data = json.loads(body)  # JSONDecodeError is a ValueError
+        body = body.decode("utf-8")
+    try:
+        data = json.loads(body)  # JSONDecodeError is a ValueError
+    except RecursionError:
+        raise ValueError("request body is nested too deeply") from None
     if not isinstance(data, dict):
         raise ValueError("request body must be a JSON object")
     return data
@@ -477,7 +480,10 @@ def route(
             payload = parse_body(body)
         except ValueError as exc:
             return 400, {"error": f"invalid JSON body: {exc}"}
-        cypher = str(payload.get("cypher") or payload.get("query") or "").strip()
+        cypher = payload.get("cypher") or payload.get("query") or ""
+        if not isinstance(cypher, str):
+            return 400, {"error": "'cypher' must be a string"}
+        cypher = cypher.strip()
         if not cypher:
             return 400, {"error": "missing 'cypher' in request body"}
         if len(cypher) > 8000:
@@ -638,9 +644,12 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
         jobs = IngestJobs(settings)
         token = secrets.token_urlsafe(24)
         html = html.replace("<!--gf-token-->", f'<meta name="gf-token" content="{token}" />')
+    html_body = html.encode("utf-8")
+    expected_token = token.encode("ascii")
 
     class Handler(BaseHTTPRequestHandler):
         server_version = "graphforge-ui"
+        timeout = 10
 
         def _rejected_origin(self) -> str | None:
             """Reason to refuse this request outright, or ``None`` to proceed.
@@ -680,40 +689,49 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
             self.send_header("Content-Type", ctype)
             self.send_header("Content-Length", str(len(body)))
             self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("Cache-Control", "no-store")
             self.end_headers()
             self.wfile.write(body)
 
         def _json(self, code: int, payload: Any) -> None:
             self._send(code, "application/json", json.dumps(payload, default=str).encode("utf-8"))
 
-        def _dispatch(self, method: str, body: bytes | None = None) -> None:
+        def _dispatch(self, method: str) -> None:
             refused = self._rejected_origin()
             if refused:
                 self._json(403, {"error": refused})
                 return
-            parsed = urlsplit(self.path)
+            try:
+                parsed = urlsplit(self.path)
+            except ValueError:
+                self._json(400, {"error": "invalid request target"})
+                return
             if api_segments(parsed.path) is not None:
                 # Anything that can change the graph needs the per-run token. The
                 # decision reads the same segments route() dispatches on, so no
                 # spelling of the path (/api//ingest) can slip past it.
                 # Constant-time, and on bytes: compare_digest raises on a str
                 # with non-ASCII characters, which a header can carry.
-                sent = (self.headers.get("X-GF-Token") or "").encode("utf-8", "replace")
-                if requires_token(parsed.path, method) and (
-                    not token or not secrets.compare_digest(sent, token.encode("ascii"))
-                ):
-                    self._json(403, {"error": "missing or invalid X-GF-Token"})
-                    return
+                if requires_token(parsed.path, method):
+                    sent = (self.headers.get("X-GF-Token") or "").encode("utf-8")
+                    if not expected_token or not secrets.compare_digest(sent, expected_token):
+                        self._json(403, {"error": "missing or invalid X-GF-Token"})
+                        return
+                body = None
+                if method == "POST":
+                    body = self._read_body()
+                    if body is None:
+                        return
                 try:
                     code, payload = route(
                         parsed.path, parsed.query, body, settings, method=method, ingest=jobs
                     )
                 except Exception as exc:  # noqa: BLE001 — last-ditch: still answer with JSON
-                    log.exception("dashboard route failed for %s", self.path)
-                    code, payload = 500, {"error": str(exc)}
+                    log.error("dashboard route failed (%s)", type(exc).__name__)
+                    code, payload = 500, {"error": "internal dashboard error"}
                 self._json(code, payload)
             elif method == "GET" and parsed.path in ("/", "/index.html"):
-                self._send(200, "text/html; charset=utf-8", html.encode("utf-8"))
+                self._send(200, "text/html; charset=utf-8", html_body)
             else:
                 self._send(404, "text/plain", b"not found")
 
@@ -721,12 +739,33 @@ def _handler(settings: Settings, bind_host: str = "127.0.0.1", *, allow_ingest: 
             self._dispatch("GET")
 
         def do_POST(self):
-            length = _as_int(self.headers.get("Content-Length"), 0)
-            if length > MAX_BODY:
+            self._dispatch("POST")
+
+        def _read_body(self) -> bytes | None:
+            if "Transfer-Encoding" in self.headers:
+                self._json(400, {"error": "Transfer-Encoding is unsupported"})
+                return None
+            lengths = self.headers.get_all("Content-Length", [])
+            if not lengths:
+                return b""
+            size = lengths[0].strip()
+            if len(lengths) != 1 or not size.isascii() or not size.isdecimal():
+                self._json(400, {"error": "invalid Content-Length"})
+                return None
+            size = size.lstrip("0") or "0"
+            if len(size) > len(str(MAX_BODY)) or int(size) > MAX_BODY:
                 self._json(413, {"error": "request body too large"})
-                return
-            body = self.rfile.read(length) if length > 0 else b""
-            self._dispatch("POST", body)
+                return None
+            length = int(size)
+            try:
+                body = self.rfile.read(length)
+            except TimeoutError:
+                self._json(408, {"error": "request body timed out"})
+                return None
+            if len(body) != length:
+                self._json(400, {"error": "incomplete request body"})
+                return None
+            return body
 
         def log_message(self, *_args):  # quiet
             return
