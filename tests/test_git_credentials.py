@@ -611,8 +611,8 @@ def test_the_user_a_helper_answers_with_is_the_one_sent(tmp_path):
 def test_a_hung_helper_cannot_hold_the_probe_past_its_timeout(tmp_path, monkeypatch):
     """Regression: on Windows the probe waited for a hung helper however short its timeout.
 
-    The helper's child kept the captured stderr pipe open, and once git was killed
-    subprocess waited for that pipe to close. The probe's timeout is cut to 2 s here.
+    The helper's child can hold either captured output pipe open after git is
+    killed. The probe's timeout is cut to 2 s here.
     """
     Path(os.environ["GIT_CONFIG_GLOBAL"]).write_text(
         '[credential]\n\thelper = "!f() { sleep 20; }; f"\n', encoding="utf-8", newline="\n"

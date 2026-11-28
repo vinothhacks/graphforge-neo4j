@@ -5,11 +5,23 @@ import shutil
 import subprocess
 import tempfile
 from pathlib import Path
+from unittest.mock import Mock
 
 import pytest
 
+from graphforge.cli import main
 from graphforge.core.config import DbSettings, Neo4jSettings, Settings
 from graphforge.ui import build_status
+
+
+def test_dashboard_cli_binds_to_loopback_by_default(monkeypatch):
+    server = Mock()
+    monkeypatch.setattr("graphforge.ui.server.ThreadingHTTPServer", server)
+
+    assert main(["ui"]) == 0
+
+    address, _ = server.call_args.args
+    assert address == ("127.0.0.1", 8000)
 
 
 def _settings(neo_pw="topsecret", db_pw="dbsecret"):

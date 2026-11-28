@@ -133,31 +133,32 @@ for the full contract and which existing parser to copy.
 
 ## Releasing to PyPI
 
-Publishing is automated via **Trusted Publishing** (OIDC — no stored token). The
-tag decides the index:
+The Release workflow uses **Trusted Publishing** (OIDC). The tag selects the
+index:
 
 | Tag | Goes to | Environment |
 |-----|---------|-------------|
-| `v0.2.0-rc1`, `v0.2.0-alpha1`, `v0.2.0-beta1` | **TestPyPI** | `testpypi` |
-| `v0.2.0` | **PyPI** | `pypi` |
+| `vX.Y.Z-rc1`, `vX.Y.Z-alpha1`, `vX.Y.Z-beta1` | **TestPyPI** | `testpypi` |
+| `vX.Y.Z` | **PyPI** | `pypi` |
 
 1. One-time, on **both** https://pypi.org and https://test.pypi.org: add a
    trusted publisher for the project `graphforge-neo4j` pointing at GitHub owner
    `vinothhacks`, repo `graphforge-neo4j`, workflow `release.yml`, environment
    `pypi` / `testpypi` respectively. Create the two GitHub environments with the
-   same names. See https://docs.pypi.org/trusted-publishers/
+   same names and configure required reviewers on both.
+   See https://docs.pypi.org/trusted-publishers/
 2. Bump `version` in `pyproject.toml` (and the fallback literal in
    `src/graphforge/__init__.py`), then move the `[Unreleased]` section of
    `CHANGELOG.md` under the new `## [x.y.z]` heading. The release workflow reads
    that section with `scripts/changelog_section.py` and uses it as the GitHub
    Release body, falling back to `Unreleased` if the rename has not happened yet.
-3. Tag and push:
-   ```bash
-   git tag v0.2.0-rc1 && git push origin v0.2.0-rc1   # rehearse on TestPyPI first
-   git tag v0.2.0     && git push origin v0.2.0
-   ```
-   The `Release` workflow builds the sdist + wheel, runs `twine check --strict`,
-   publishes, and attaches a GitHub Release with the dist files.
+3. Tag the merged revision with the matching version and push the tag. The
+   `Release` workflow builds the wheel and sdist, checks their metadata,
+   uploads `SHA256SUMS`, and verifies both installs against disposable Neo4j.
+4. To request publishing, manually dispatch the workflow on that tag with
+   `publish` enabled. A reviewer must approve the requested environment for
+   that run. After successful publication, the workflow creates a GitHub
+   Release with the distributions and `SHA256SUMS`.
 
 Install a release candidate to check it:
 
@@ -167,14 +168,6 @@ pip install --index-url https://test.pypi.org/simple/ \
 ```
 
 (The extra index is required — the runtime dependencies only exist on real PyPI.)
-
-To publish manually instead:
-```bash
-pip install build twine
-python -m build
-twine check dist/*
-twine upload dist/*        # needs a PyPI token
-```
 
 ## Commit / PR checklist
 

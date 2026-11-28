@@ -284,27 +284,30 @@ class GitHandler:
         if not (url + user).isprintable():
             return None
         try:
-            proc = subprocess.run(
-                ["git", "credential", "fill"],
-                input=f"url={url}\nusername={user}\n\n",
-                cwd=cwd,
-                # stderr is not captured: a helper that hangs leaves a child
-                # holding it open, and on Windows the timeout then waits for
-                # that pipe to close instead of ending the call.
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=60,
-                check=False,
-                env=_git_env(GIT_ASKPASS=""),
-            )
+            # On Windows, a hung helper can inherit either pipe and prevent
+            # subprocess.run from returning after it kills git on timeout.
+            with tempfile.TemporaryFile() as output:
+                proc = subprocess.run(
+                    ["git", "credential", "fill"],
+                    input=f"url={url}\nusername={user}\n\n",
+                    cwd=cwd,
+                    stdout=output,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    encoding="utf-8",
+                    timeout=60,
+                    check=False,
+                    env=_git_env(GIT_ASKPASS=""),
+                )
+                if proc.returncode != 0:
+                    return None
+                output.seek(0)
+                reply = output.read().decode("utf-8", errors="replace")
         except (OSError, subprocess.SubprocessError):
             return None
-        lines = (line.partition("=") for line in proc.stdout.splitlines())
+        lines = (line.partition("=") for line in reply.splitlines())
         answer = {key: value for key, _, value in lines}
-        if proc.returncode != 0 or "password" not in answer:
+        if "password" not in answer:
             return None
         return answer.get("username", user), answer["password"]
 
