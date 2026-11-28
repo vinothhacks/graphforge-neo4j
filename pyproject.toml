@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68", "wheel"]
+requires = ["setuptools>=84.1", "wheel>=0.46.2"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -37,12 +37,13 @@ dependencies = [
     # Floor: execute_read/execute_write retry semantics settled in 5.14.
     # Ceiling: 6.x is verified in use here; 7 is unreleased and unprobed.
     "neo4j>=5.14,<7",
-    "python-dotenv>=1.0.0",
+    "packaging>=23",
+    "python-dotenv>=1.2.2",
     "tqdm>=4.65.0",
 ]
 
 [project.optional-dependencies]
-mcp = ["mcp>=2"]
+mcp = ["mcp>=2.2.0"]
 mysql = ["mysql-connector-python>=8.0"]
 postgres = ["psycopg2-binary>=2.9"]
 mssql = ["pyodbc>=5.0"]
@@ -52,8 +53,8 @@ dev = [
     # The suite builds the REAL MCP server (tests/test_mcp_tools.py) rather than
     # a stub, so the extra is a test dependency. Without it every CI job that
     # installs `.[dev]` failed those tests with MissingExtra.
-    "mcp>=2",
-    "pytest>=7.4",
+    "mcp>=2.2.0",
+    "pytest>=9.0.3",
     "pytest-cov>=4.1",
     "ruff>=0.5",
     "mypy>=1.10",
@@ -63,7 +64,7 @@ dev = [
 ]
 # Everything, for anyone who wants the pre-0.3 behaviour back in one line.
 all = [
-    "mcp>=2",
+    "mcp>=2.2.0",
     "mysql-connector-python>=8.0",
     "psycopg2-binary>=2.9",
     "pyodbc>=5.0",

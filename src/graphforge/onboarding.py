@@ -10,19 +10,19 @@ they call `cmd_init` / `cmd_git` / `cmd_db` / `cmd_link` like anybody else would
 from __future__ import annotations
 
 import os
-import re
 import shutil
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+from packaging.version import InvalidVersion, Version
+
 from .core.config import Settings, allow_empty_password
 
 OK, WARN, FAIL, INFO = "ok", "warn", "fail", "info"
 
-#: The oldest ``mcp`` major the server runs on: 2.0 is where FastMCP became
-#: MCPServer. Keep in step with the ``mcp>=2`` pin in pyproject.toml.
-MIN_MCP_MAJOR = 2
+#: The minimum supported MCP SDK version in pyproject.toml.
+MIN_MCP_VERSION = "2.2.0"
 
 _MARKS = {OK: ("v", "✓"), WARN: ("!", "!"), FAIL: ("x", "✗"), INFO: ("-", "·")}
 
@@ -76,13 +76,16 @@ def _mcp_status() -> Check:
         installed = metadata.version("mcp")
     except metadata.PackageNotFoundError:
         return Check(WARN, "mcp extra", "not installed", f"{fix} to serve the graph")
-    major = re.match(r"\d+", installed)
-    if not major or int(major.group()) < MIN_MCP_MAJOR:
+    try:
+        supported = Version(installed) >= Version(MIN_MCP_VERSION)
+    except InvalidVersion:
+        supported = False
+    if not supported:
         return Check(
             WARN,
             "mcp extra",
-            f"mcp {installed} is installed, but the server needs mcp>={MIN_MCP_MAJOR}",
-            fix,
+            f"mcp {installed} is installed, but the server needs mcp>={MIN_MCP_VERSION}",
+            f"pip install -U 'mcp>={MIN_MCP_VERSION}'",
         )
     return Check(OK, "mcp extra", f"mcp {installed}")
 

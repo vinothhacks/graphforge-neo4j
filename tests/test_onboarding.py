@@ -23,7 +23,7 @@ from graphforge.mcp import clients, install
 from graphforge.onboarding import (
     FAIL,
     INFO,
-    MIN_MCP_MAJOR,
+    MIN_MCP_VERSION,
     OK,
     WARN,
     Check,
@@ -239,19 +239,19 @@ def _mcp_check(monkeypatch, installed: str | None) -> Check:
     return {c.label: c for c in run_checks(_settings(password=""))}["mcp extra"]
 
 
-def test_doctor_does_not_pass_an_mcp_the_server_cannot_run(monkeypatch):
-    """`import mcp` succeeds on 1.x, so the doctor said "installed" for a server
-    that cannot start: 2.0 is where FastMCP became MCPServer."""
-    check = _mcp_check(monkeypatch, "1.9.4")
-    assert check.status == WARN, "mcp 1.x was reported as fine"
-    assert "1.9.4" in check.detail and f"mcp>={MIN_MCP_MAJOR}" in check.detail
-    assert "pip install -U" in check.fix
+@pytest.mark.parametrize("version", ["1.9.4", "2.1.1", "2.2.0rc1", "invalid"])
+def test_doctor_warns_about_unsupported_mcp_versions(monkeypatch, version):
+    check = _mcp_check(monkeypatch, version)
+    assert check.status == WARN
+    assert version in check.detail and f"mcp>={MIN_MCP_VERSION}" in check.detail
+    assert check.fix == f"pip install -U 'mcp>={MIN_MCP_VERSION}'"
 
 
-def test_doctor_accepts_a_current_mcp_and_names_its_version(monkeypatch):
-    check = _mcp_check(monkeypatch, "2.1.1")
+@pytest.mark.parametrize("version", ["2.2.0", "2.3.0"])
+def test_doctor_accepts_a_current_mcp_and_names_its_version(monkeypatch, version):
+    check = _mcp_check(monkeypatch, version)
     assert check.status == OK
-    assert "2.1.1" in check.detail
+    assert version in check.detail
 
 
 def test_doctor_says_how_to_install_a_missing_mcp(monkeypatch):
@@ -267,7 +267,7 @@ def test_the_doctor_mcp_floor_matches_the_declared_pin():
     pyproject = tomllib.loads(
         (Path(__file__).resolve().parents[1] / "pyproject.toml").read_text(encoding="utf-8")
     )
-    assert pyproject["project"]["optional-dependencies"]["mcp"] == [f"mcp>={MIN_MCP_MAJOR}"]
+    assert pyproject["project"]["optional-dependencies"]["mcp"] == [f"mcp>={MIN_MCP_VERSION}"]
 
 
 @pytest.fixture
