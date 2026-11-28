@@ -1,221 +1,204 @@
 name: Release
 
-# Publishes graphforge-neo4j when a version tag is pushed.
-#
-#   v0.2.0        -> PyPI      (environment: pypi)
-#   v0.2.0-rc1    -> TestPyPI  (environment: testpypi)
-#
-# Both use PyPI Trusted Publishing (OIDC). No API token is stored in this repo:
-# the only thing that grants publish rights is `permissions: id-token: write`
-# plus a matching trusted-publisher entry on the index.
-#
-# One-time setup, on BOTH https://pypi.org and https://test.pypi.org
-# (https://docs.pypi.org/trusted-publishers/):
-#   owner: vinothhacks   repo: graphforge-neo4j
-#   workflow: release.yml
-#   environment: pypi      (on pypi.org)
-#   environment: testpypi  (on test.pypi.org)
-# Create the two GitHub environments with the same names. Adding required
-# reviewers to `pypi` is a cheap way to make production publishes deliberate.
-
+# Pull requests and version tags verify packages. To publish, dispatch this
+# workflow on the version tag with publish enabled. Configure required
+# reviewers on pypi and testpypi and match the environment in Trusted
+# Publishing. The publish job also checks that this run was approved.
 on:
+  pull_request:
   push:
     tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      publish:
+        description: Request publication of the verified version tag
+        type: boolean
+        default: false
 
 permissions:
   contents: read
 
+concurrency:
+  group: release-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-  # ---------------------------------------------------------------------------
   build:
-    name: build
+    name: build release artifacts
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    env:
+      PIP_CONSTRAINT: ${{ github.workspace }}/.github/constraints.txt
     outputs:
-      prerelease: ${{ steps.classify.outputs.prerelease }}
-      version: ${{ steps.classify.outputs.version }}
+      prerelease: ${{ steps.tag.outputs.prerelease }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 0        # the changelog extractor reads the worktree, but
-                                # full history keeps `git describe` usable too
-
-      - uses: actions/setup-python@v5
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
           python-version: "3.12"
-
-      # v1.2.3      -> prerelease=false
-      # v1.2.3-rc1  -> prerelease=true
-      - name: Classify the tag
-        id: classify
+      - name: Build and check wheel and sdist
         run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          case "$TAG" in
-            v*-rc*|v*rc[0-9]*|v*-alpha*|v*-beta*)
-              PRERELEASE=true ;;
-            v*)
-              PRERELEASE=false ;;
-            *)
-              echo "::error::tag '$TAG' does not start with 'v'; refusing to publish"
-              exit 1 ;;
-          esac
-          echo "tag=$TAG"                     >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}"             >> "$GITHUB_OUTPUT"
-          echo "prerelease=$PRERELEASE"       >> "$GITHUB_OUTPUT"
-          echo "::notice::$TAG -> $([ "$PRERELEASE" = true ] && echo TestPyPI || echo PyPI)"
-
-      - name: Build sdist + wheel
+          python -m pip install build twine setuptools wheel
+          python -m build --no-isolation
+          python -m twine check --strict dist/*.whl dist/*.tar.gz
+          sha256sum -- dist/*.whl dist/*.tar.gz > SHA256SUMS
+      - name: Validate the tag against the built version
+        id: tag
+        if: startsWith(github.ref, 'refs/tags/v')
         run: |
-          python -m pip install --upgrade build
-          python -m build
+          python - <<'PY'
+          import os
+          from pathlib import Path
+          from packaging.utils import parse_wheel_filename
+          from packaging.version import Version
 
-      - name: Check metadata
-        run: |
-          python -m pip install --upgrade twine
-          python -m twine check --strict dist/*
-
-      - name: Start disposable Neo4j
-        run: docker compose -f docker-compose.ci.yml up -d --wait neo4j
-
-      - name: Verify wheel and sdist installs
-        env:
-          NEO4J_URI: bolt://127.0.0.1:7687
-          NEO4J_USER: neo4j
-          NEO4J_PASSWORD: graphforge-ci-password
-          NEO4J_DATABASE: neo4j
-        run: |
-          set -euo pipefail
-          for archive in dist/*.whl dist/*.tar.gz; do
-            env_dir="$(mktemp -d)"
-            python -m venv "$env_dir"
-            "$env_dir/bin/python" -m pip install "$archive[mcp]"
-            "$env_dir/bin/graphforge" --version
-            "$env_dir/bin/graphforge" init
-            "$env_dir/bin/graphforge" doctor
-            "$env_dir/bin/graphforge" mcp install --client cursor --dry-run
-          done
-
-      - name: Stop disposable Neo4j
-        if: always()
-        run: docker compose -f docker-compose.ci.yml down -v
-
-      # Advisory only. An RC tag (v0.2.0-rc1) legitimately differs from the
-      # PEP 440 version in pyproject.toml (0.2.0rc1), and the index itself is
-      # the real authority on version collisions - so this warns, never fails.
-      - name: Compare tag against built version
-        # The tag arrives through `env:`, never through `${{ }}` inside the
-        # script body, so a crafted tag name cannot become shell code.
-        env:
-          TAGGED: ${{ steps.classify.outputs.version }}
-        run: |
-          set -euo pipefail
-          BUILT="$(python -c "import glob, os; print(os.path.basename(sorted(glob.glob('dist/*.whl'))[0]).split('-')[1])")"
-          echo "tag=$TAGGED built=$BUILT"
-          if [ "${BUILT//-/}" != "${TAGGED//-/}" ]; then
-            echo "::warning::tag $TAGGED and built version $BUILT differ - check [project].version in pyproject.toml"
-          fi
-
-      - name: Extract the CHANGELOG section for this tag
-        run: |
-          python scripts/changelog_section.py "${GITHUB_REF_NAME}" > release-notes.md
-          echo "--- release notes ---"
-          cat release-notes.md
-
-      - uses: actions/upload-artifact@v4
+          tag = Version(os.environ["GITHUB_REF_NAME"].removeprefix("v"))
+          wheel, = Path("dist").glob("*.whl")
+          _, built, _, _ = parse_wheel_filename(wheel.name)
+          if tag != built:
+              raise SystemExit(f"Tag version {tag} differs from built version {built}")
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              print(f"prerelease={str(tag.is_prerelease).lower()}", file=output)
+          PY
+      - name: Extract release notes
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: python scripts/changelog_section.py "$GITHUB_REF_NAME" > release-notes.md
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: dist
-          path: dist/
+          path: |
+            dist/
+            SHA256SUMS
           if-no-files-found: error
-
-      - uses: actions/upload-artifact@v4
+          retention-days: 14
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: startsWith(github.ref, 'refs/tags/v')
         with:
           name: release-notes
           path: release-notes.md
           if-no-files-found: error
+          retention-days: 14
 
-  # ---------------------------------------------------------------------------
-  # Release candidates -> TestPyPI. Install one with:
-  #   pip install --index-url https://test.pypi.org/simple/ \
-  #               --extra-index-url https://pypi.org/simple/ graphforge-neo4j
-  # (the extra index is needed because the runtime dependencies only live on
-  # the real PyPI).
-  # ---------------------------------------------------------------------------
-  publish-testpypi:
-    name: publish to TestPyPI
+  verify-packages:
+    name: verify packaged installs against disposable Neo4j
     needs: build
-    if: needs.build.outputs.prerelease == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: ${{ runner.temp }}/candidate
+      - name: Start disposable Neo4j
+        run: docker compose -f docker-compose.ci.yml up -d --wait neo4j
+      - name: Verify wheel and sdist in separate environments
+        working-directory: ${{ runner.temp }}/candidate
+        env:
+          PIP_CONSTRAINT: ${{ github.workspace }}/.github/constraints.txt
+          PIP_BUILD_CONSTRAINT: ${{ github.workspace }}/.github/constraints.txt
+          NEO4J_DRIVER: "6.3.0"
+          NEO4J_URI: bolt://127.0.0.1:7687
+          NEO4J_USER: neo4j
+          NEO4J_DATABASE: neo4j
+        run: |
+          set -euo pipefail
+          compose="${GITHUB_WORKSPACE}/docker-compose.ci.yml"
+          auth="$(docker compose -f "$compose" exec -T neo4j printenv NEO4J_AUTH)"
+          export NEO4J_PASSWORD="${auth#*/}"
+          echo "::add-mask::$NEO4J_PASSWORD"
+          sha256sum --check SHA256SUMS
+          for archive in dist/*.whl dist/*.tar.gz; do
+            smoke_dir="$(mktemp -d)"
+            python -m venv "$smoke_dir/venv"
+            bin="$smoke_dir/venv/bin"
+            "$bin/python" -m pip install pip
+            "$bin/python" -m pip install "$archive[mcp]" "neo4j==${NEO4J_DRIVER}"
+            "$bin/python" -m pip check
+            mkdir "$smoke_dir/home" "$smoke_dir/work"
+            (
+              export HOME="$smoke_dir/home"
+              cd "$smoke_dir/work"
+              "$bin/graphforge" --help
+              "$bin/graphforge" init
+              "$bin/graphforge" doctor
+              printf 'NEO4J_URI=%s\n' "$NEO4J_URI" > .env
+              preview="$("$bin/graphforge" mcp install --client cursor --dry-run)"
+              printf '%s\n' "$preview"
+              grep -q '"mcpServers"' <<< "$preview"
+              test ! -e .cursor/mcp.json
+            )
+          done
+      - name: Stop disposable Neo4j
+        if: always()
+        run: docker compose -f docker-compose.ci.yml down -v
+
+  publish:
+    name: publish verified packages
+    needs: [build, verify-packages]
+    # A rerun can retain approval history. Require a fresh dispatch for publishing.
+    if: >-
+      github.event_name == 'workflow_dispatch'
+      && inputs.publish
+      && startsWith(github.ref, 'refs/tags/v')
+      && github.run_attempt == '1'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     environment:
-      name: testpypi
-      url: https://test.pypi.org/p/graphforge-neo4j
+      name: ${{ needs.build.outputs.prerelease == 'true' && 'testpypi' || 'pypi' }}
+      url: ${{ needs.build.outputs.prerelease == 'true' && 'https://test.pypi.org/p/graphforge-neo4j' || 'https://pypi.org/p/graphforge-neo4j' }}
     permissions:
-      id-token: write        # required for Trusted Publishing
+      actions: read
+      id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Require explicit environment approval
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ENV: ${{ needs.build.outputs.prerelease == 'true' && 'testpypi' || 'pypi' }}
+        run: |
+          set -euo pipefail
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/approvals" |
+            jq -e --arg name "$RELEASE_ENV" 'any(.[]; .state == "approved" and any(.environments[]; .name == $name))'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
+      - name: Verify artifact checksums
+        run: sha256sum --check SHA256SUMS
+      - uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.13.0
         with:
-          repository-url: https://test.pypi.org/legacy/
-          # Re-cutting the same RC after a workflow fix is routine; do not fail
-          # the run just because that file is already on the test index.
-          skip-existing: true
+          repository-url: ${{ needs.build.outputs.prerelease == 'true' && 'https://test.pypi.org/legacy/' || 'https://upload.pypi.org/legacy/' }}
+          skip-existing: ${{ needs.build.outputs.prerelease == 'true' }}
 
-  # ---------------------------------------------------------------------------
-  publish-pypi:
-    name: publish to PyPI
-    needs: build
-    if: needs.build.outputs.prerelease == 'false'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    environment:
-      name: pypi
-      url: https://pypi.org/p/graphforge-neo4j
-    permissions:
-      id-token: write        # required for Trusted Publishing
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: dist
-          path: dist/
-      - uses: pypa/gh-action-pypi-publish@release/v1
-
-  # ---------------------------------------------------------------------------
-  # One GitHub Release for either path, with the CHANGELOG section as its body
-  # and the built artifacts attached. `if: always() && ...` is required because
-  # exactly one of the two publish jobs is always skipped, and a skipped
-  # dependency would otherwise skip this job too.
-  # ---------------------------------------------------------------------------
   github-release:
     name: github release
-    needs: [build, publish-pypi, publish-testpypi]
-    if: >-
-      always()
-      && needs.build.result == 'success'
-      && !contains(needs.*.result, 'failure')
-      && !contains(needs.*.result, 'cancelled')
+    needs: [build, publish]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write        # required to create the release
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: dist
-          path: dist/
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: release-notes
-      - name: Generate release checksums
-        working-directory: dist
-        run: sha256sum -- *.whl *.tar.gz > SHA256SUMS
-      - uses: softprops/action-gh-release@v2
+      - name: Verify artifact checksums
+        run: sha256sum --check SHA256SUMS
+      - uses: softprops/action-gh-release@5be0e66d93ac7ed76da52eca8bb058f665c3a5fe # v2.4.2
         with:
           name: ${{ github.ref_name }}
           body_path: release-notes.md
           prerelease: ${{ needs.build.outputs.prerelease == 'true' }}
-          files: dist/*
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
+            SHA256SUMS
           fail_on_unmatched_files: true
