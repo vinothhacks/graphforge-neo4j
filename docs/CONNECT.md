@@ -4,6 +4,10 @@ This is the path from a fresh clone to asking the graph a question. Nothing
 here needs a secret in git: passwords live in `.env` (gitignored) or in a
 local MCP config that you do **not** commit.
 
+The `doctor` and `mcp install` steps use the unpublished v0.3.0 candidate.
+The published PyPI v0.2.0 package lacks both commands. See the
+[installation instructions](../README.md#install) for the candidate.
+
 ## 1. Neo4j
 
 Start the bundled instance from the repository root:
@@ -29,13 +33,18 @@ NEO4J_PASSWORD=please-change-me
 NEO4J_DATABASE=neo4j
 ```
 
-Confirm the driver can talk to it:
+Check the candidate install, Neo4j connection, and graph:
 
 ```bash
-graphforge verify
+graphforge doctor
 ```
 
-`graphforge ui` then serves a dashboard at [http://localhost:8000](http://localhost:8000).
+If Neo4j is unreachable, check that it is running and retry. To check the
+connection alone on v0.2.0, run `graphforge verify`.
+
+`graphforge ui` serves an **unauthenticated, local-only** dashboard at
+[http://127.0.0.1:8000](http://127.0.0.1:8000) by default. Keep the loopback
+bind and avoid exposing it over a network, reverse proxy, or tunnel.
 The Browser at `:7474` is Neo4j's own UI — use it for raw Cypher; use the
 dashboard for search, labels, and a force-directed sample of the graph.
 
@@ -90,14 +99,14 @@ The server is stdio, read-only, and talks to the same Neo4j as the CLI:
 graphforge mcp
 ```
 
-You do not have to wire that up by hand:
+Preview the config from your project directory before writing it:
 
 ```bash
-graphforge mcp install                      # every client we know about
-graphforge mcp install --client cursor      # or just one
-graphforge mcp install --dry-run            # show what would be written
-graphforge mcp install --remove             # undo
+graphforge mcp install --client cursor --dry-run
 ```
+
+The preview prints the target path and proposed entry without changing files.
+When the entry is ready, rerun without `--dry-run`. Use `--remove` to undo it.
 
 It knows the per-OS path for Claude Desktop, and writes `.mcp.json` for Claude
 Code and `.cursor/mcp.json` for Cursor. Two details worth knowing:

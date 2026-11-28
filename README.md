@@ -70,24 +70,24 @@ by holding each page on screen for exactly as long as its narration runs.
 
 ## Install
 
+PyPI currently publishes **v0.2.0**. It lacks `graphforge doctor` and
+`graphforge mcp install`. The onboarding steps below use the **unpublished
+v0.3.0 candidate**, which you can install from a checkout of this branch.
+
 ```bash
-pip install graphforge-neo4j                  # core: git ingest + the graph
-pip install "graphforge-neo4j[mcp]"           # + the MCP server
-pip install "graphforge-neo4j[postgres]"      # + a database driver: postgres | mysql | mssql
-pip install "graphforge-neo4j[all]"           # everything
-cp .env.example .env                          # then set your Neo4j password in .env
+python -m pip install graphforge-neo4j==0.2.0
 ```
 
 The import package and CLI are both `graphforge` (only the PyPI distribution name is `graphforge-neo4j`).
 
 **Database drivers are extras as of 0.3.** Every driver is imported lazily behind a guard, so bundling all three only meant that someone who wanted to graph a repository still had to build `pyodbc` — which needs a system ODBC driver and is the most likely of the three to fail. Pick the engine you use, or `[all]` for the previous behaviour. If you point `graphforge db` at an engine whose driver is missing, it tells you the exact command. `[gitlab]` adds GitLab group auto-discovery, the only feature that needs an HTTP client.
 
-From source:
+From the v0.3.0 candidate checkout, activate a Python virtual environment,
+then run:
 
 ```bash
-git clone https://github.com/vinothhacks/graphforge-neo4j.git
-cd graphforge-neo4j
-pip install -e ".[dev]"
+python -m pip install ".[mcp]"
+cp .env.example .env                          # then set your Neo4j password in .env
 ```
 
 Need a graph to write into? `docker compose up -d` starts Neo4j 5 at `bolt://127.0.0.1:7687` (edit the password in `docker-compose.yml` and mirror it in `.env`).
@@ -98,18 +98,20 @@ Requires **Python 3.10+** and the `git` CLI. SQL Server additionally needs a sys
 
 ## Quickstart
 
-One command does the whole sequence below — it asks for anything it needs, checks
-each step before the next, and wires up an MCP client at the end:
+From the directory containing your `.env`, check the candidate install and
+preview the MCP client entry before registering it:
 
 ```bash
-graphforge quickstart
+graphforge doctor
+graphforge mcp install --client cursor --dry-run
 ```
 
-If anything goes wrong, at any point:
-
-```bash
-graphforge doctor        # what's broken, and the command that fixes it
-```
+`doctor` checks the install, Neo4j connection and graph, and suggests fixes.
+Start Neo4j and retry if it reports that the server is unreachable. The MCP
+dry run prints the target path and proposed JSON without writing the config.
+Use `--client claude-code` or `--client claude-desktop` for those clients.
+When ready to write the entry, rerun without `--dry-run`. For guided setup,
+run `graphforge quickstart`.
 
 The individual steps, if you'd rather drive them yourself:
 
@@ -396,10 +398,12 @@ Merge [`examples/claude_desktop_config.json`](examples/claude_desktop_config.jso
 
 ## Dashboard
 
-The dashboard is unauthenticated. Use it only on your own machine and keep it bound to loopback.
+The dashboard is **unauthenticated and for local use only**.
+`graphforge ui` binds to `127.0.0.1` by default. Keep it on loopback and
+avoid exposing it through a public bind address, reverse proxy, or tunnel.
 
 ```bash
-graphforge ui        # then open http://localhost:8000
+graphforge ui        # then open http://127.0.0.1:8000
 ```
 
 A **zero-dependency** local page — Python's stdlib HTTP server, one hand-written HTML file, no npm, no build step, and no CDN, so it works on an air-gapped box. It gives you:
@@ -416,7 +420,7 @@ A **zero-dependency** local page — Python's stdlib HTTP server, one hand-writt
 
 Behind it are seven read-only JSON endpoints: `GET /api/status`, `/api/schema`, `/api/graph/sample`, `/api/search`, `/api/labels/<label>/sample`, `/api/node/<id>/neighbors`, and `POST /api/query`. Every one validates its input *before* opening a connection, so a rejected request provably never reaches the database.
 
-**How "Add data" is gated.** The page has no authentication, so the browser is the only thing between it and any site you have open. The ingest endpoints therefore do not exist unless the server is bound to loopback, and every request that starts an ingest (any non-GET request to them) must carry a per-run token that is served inside the page — which a cross-origin script cannot read. A foreign `Origin`, or a `Host` that is not loopback, is refused outright. Run `graphforge ui --host 0.0.0.0` and ingest is simply not there.
+**How "Add data" is gated.** Ingest endpoints require a loopback bind. Requests that start an ingest must carry a per-run token served in the page. Loopback requests also validate the `Host` and `Origin` headers. The dashboard exposes graph data to anyone who can reach it.
 
 ### Screenshots
 

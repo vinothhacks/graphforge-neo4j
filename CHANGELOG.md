@@ -4,7 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [0.3.0]
+
+Unpublished candidate.
+
+### Release verification
+
+- Build wheel and sdist with pinned workflow inputs, check metadata, and
+  upload SHA-256 checksums. Pull requests verify each install against
+  disposable Neo4j. Publication requires manual dispatch on a version tag
+  and explicit environment approval.
 
 ### Changed — BREAKING
 
@@ -28,7 +37,8 @@ All notable changes to this project are documented here. The format is based on
   'graphforge[mssql]'` it used to print — an extra that never existed, on a
   distribution that is not called that.
 
-- **The `mcp` extra now requires `mcp` 2.x.** 0.2.0 asked for `mcp>=1.2.0`. The
+- **The `mcp` extra now requires `mcp>=2.2.0`.** The 2.2.0 floor includes
+  security fixes. 0.2.0 asked for `mcp>=1.2.0`. The
   server is now built on the 2.x `MCPServer` API, so on 1.x `graphforge mcp`
   stops with an error naming the upgrade instead of serving. Upgrading
   `graphforge-neo4j` on its own leaves an installed `mcp` 1.x in place; upgrade
